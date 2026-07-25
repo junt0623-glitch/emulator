@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>カートリッジ棚 — 携帯機エミュレータ</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="カートリッジ棚">
+<meta name="theme-color" content="#191c22">
+<style>
+:root{
+  --chassis:#191c22; --panel:#232833; --panel2:#1e222b; --edge:#39404e;
+  --ivory:#ede8dc; --dim:#9aa3b2; --brass:#c9a227; --led:#5fb98a; --warn:#d8804a;
+  --nes:#b4352e; --sfc:#6e7b8b; --gba:#4b5ba8; --nds:#a8adb5;
+  --plate:#f2eee2;
+  --disp:"Helvetica Neue","Arial Narrow","Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif;
+  --body:"Hiragino Sans","Hiragino Kaku Gothic ProN","Noto Sans JP",system-ui,sans-serif;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%}
+body{
+  background:var(--chassis); color:var(--ivory); font-family:var(--body);
+  font-size:15px; line-height:1.5; touch-action:manipulation;
+  -webkit-user-select:none; user-select:none;
+  padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+.wrap{max-width:960px;margin:0 auto;padding:14px 14px 40px}
+
+/* ---- chassis header: engraved plate ---- */
+header{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;
+  border-bottom:1px solid var(--edge);padding-bottom:10px;margin-bottom:16px}
+h1{font-family:var(--disp);font-stretch:condensed;font-size:19px;font-weight:600;
+  letter-spacing:.14em;margin:0;text-transform:none}
+.sub{font-family:var(--mono);font-size:10.5px;color:var(--dim);letter-spacing:.1em}
+.net{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--dim);display:flex;align-items:center;gap:6px}
+.net i{width:7px;height:7px;border-radius:50%;background:var(--dim);display:inline-block}
+.net.on i{background:var(--led);box-shadow:0 0 7px var(--led)}
+
+/* ---- cartridge label plates ---- */
+.shelf{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:0 0 20px}
+.plate{background:var(--plate);color:#1b1e24;border-radius:3px;padding:10px 11px 11px;
+  border-left:7px solid var(--edge);box-shadow:0 1px 0 #0006}
+.plate.nes{border-left-color:var(--nes)} .plate.sfc{border-left-color:var(--sfc)}
+.plate.gba{border-left-color:var(--gba)} .plate.nds{border-left-color:var(--nds)}
+.plate b{display:block;font-family:var(--disp);font-stretch:condensed;font-size:14px;letter-spacing:.08em}
+.plate span{font-family:var(--mono);font-size:11px;color:#5c6371;display:block;margin-top:3px}
+.plate em{font-family:var(--mono);font-size:10px;font-style:normal;color:#8a919e;display:block;margin-top:6px}
+.plate em.ready{color:#2f7d55}
+
+/* ---- controls ---- */
+.row{display:flex;gap:9px;flex-wrap:wrap;align-items:center;margin:0 0 14px}
+button,.filebtn{font-family:var(--body);font-size:14px;color:var(--ivory);
+  background:linear-gradient(#2a303b,#212632);border:1px solid var(--edge);border-radius:4px;
+  padding:11px 15px;min-height:44px;cursor:pointer;letter-spacing:.02em}
+button:active,.filebtn:active{background:#171b22}
+button:focus-visible,.filebtn:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
+button[disabled]{opacity:.4;cursor:default}
+button.key{border-color:#5c5231;background:linear-gradient(#3a3421,#2b2718);color:#f0dfa8}
+.filebtn{display:inline-flex;align-items:center}
+.filebtn input{display:none}
+.legend{font-family:var(--mono);font-size:10.5px;letter-spacing:.12em;color:var(--dim);margin:22px 0 8px}
+
+/* ---- signature: 4-detent speed switch ---- */
+.switch{position:relative;background:var(--panel2);border:1px solid var(--edge);border-radius:6px;
+  padding:8px;display:grid;grid-template-columns:repeat(4,1fr);gap:0}
+.switch::before{content:"";position:absolute;left:14px;right:14px;top:50%;height:2px;
+  background:repeating-linear-gradient(90deg,#0000 0 24%,var(--edge) 24% 26%,#0000 26% 100%);transform:translateY(-50%)}
+.switch button{position:relative;z-index:1;background:none;border:0;border-radius:4px;min-height:46px;
+  font-family:var(--mono);font-size:15px;letter-spacing:.06em;color:var(--dim);padding:0}
+.switch button[aria-pressed="true"]{color:#1b1e24;background:linear-gradient(#e5cb63,#c9a227);box-shadow:0 1px 0 #0008,inset 0 1px 0 #fff6}
+.note{font-family:var(--mono);font-size:10.5px;color:var(--warn);margin:7px 0 0;line-height:1.6}
+.note:empty{display:none}
+
+/* ---- save slots as label strips ---- */
+.slots{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px}
+.slot{background:var(--panel);border:1px solid var(--edge);border-radius:5px;padding:9px;
+  display:flex;gap:9px;align-items:center;transition:transform .12s ease}
+.slot.filled{border-color:#4c5568}
+.slot .thumb{width:56px;height:42px;flex:none;border-radius:2px;background:#0c0e12 center/cover no-repeat;
+  border:1px solid #0008}
+.slot .meta{flex:1;min-width:0}
+.slot .n{font-family:var(--mono);font-size:10.5px;letter-spacing:.14em;color:var(--dim)}
+.slot .t{font-family:var(--mono);font-size:11px;color:var(--ivory);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.slot .acts{display:flex;flex-direction:column;gap:5px}
+.slot .acts button{padding:6px 9px;min-height:32px;font-size:12px}
+
+/* ---- screen ---- */
+#screen{background:#0c0e12;border:1px solid var(--edge);border-radius:6px;overflow:hidden;
+  width:100%;aspect-ratio:4/3;max-height:70dvh}
+#screen:fullscreen{border:0;border-radius:0;max-height:none;aspect-ratio:auto;height:100%}
+.hidden{display:none!important}
+
+/* ---- panels ---- */
+details{border:1px solid var(--edge);border-radius:5px;background:var(--panel2);margin-top:12px}
+summary{padding:12px 14px;font-family:var(--mono);font-size:11.5px;letter-spacing:.1em;color:var(--dim);cursor:pointer}
+.body{padding:0 14px 14px}
+label.f{display:block;font-family:var(--mono);font-size:11px;color:var(--dim);margin:10px 0 4px;letter-spacing:.06em}
+input[type=text],select{width:100%;background:#15181f;color:var(--ivory);border:1px solid var(--edge);
+  border-radius:4px;padding:10px;font-family:var(--mono);font-size:13px;min-height:44px}
+p.help{font-size:12.5px;color:var(--dim);line-height:1.7;margin:8px 0 0}
+#toast{position:fixed;left:50%;bottom:calc(18px + env(safe-area-inset-bottom));transform:translateX(-50%);
+  background:#0d1015;border:1px solid var(--edge);color:var(--ivory);font-family:var(--mono);font-size:12px;
+  padding:10px 16px;border-radius:20px;opacity:0;pointer-events:none;transition:opacity .2s;z-index:99;max-width:88vw;text-align:center}
+#toast.show{opacity:1}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>カートリッジ棚</h1>
+  <span class="sub">NES / SFC / GBA / NDS</span>
+  <span class="net" id="net"><i></i><span id="netTxt">確認中</span></span>
+</header>
+
+<!-- ============ 選択画面 ============ -->
+<section id="picker">
+  <div class="shelf">
+    <div class="plate nes"><b>ファミコン</b><span>.nes .fds</span><em data-ready="nes">未起動</em></div>
+    <div class="plate sfc"><b>スーパーファミコン</b><span>.smc .sfc</span><em data-ready="snes">未起動</em></div>
+    <div class="plate gba"><b>ゲームボーイアドバンス</b><span>.gba</span><em data-ready="gba">未起動</em></div>
+    <div class="plate nds"><b>ニンテンドーDS</b><span>.nds</span><em data-ready="nds">未起動</em></div>
+  </div>
+
+  <div class="row">
+    <label class="filebtn key">この端末から選ぶ
+      <input type="file" id="localFile" accept=".nes,.fds,.smc,.sfc,.gba,.nds,.zip,.7z">
+    </label>
+    <button id="driveBtn">Googleドライブから選ぶ</button>
+  </div>
+  <p class="note" id="pickNote"></p>
+
+  <div class="legend">オフラインの準備</div>
+  <p class="help">各機種を <b>一度オンラインで起動</b> すると、その機種のコアが端末内に保存されます。以降は機内モードでも同じ機種が動きます。ラベルの表示が「保存済み」に変わります。ホーム画面に追加すると全画面アプリとして開けます。</p>
+
+  <details>
+    <summary>設定</summary>
+    <div class="body">
+      <label class="f">DS のコア</label>
+      <select id="ndsCore">
+        <option value="desmume2015">desmume2015（BIOS不要・軽い）</option>
+        <option value="melonds">melonDS（BIOS必須・精度高）</option>
+      </select>
+      <label class="f">DS の BIOS（melonDS 使用時のみ／bios7.bin・bios9.bin・firmware.bin をまとめた zip）</label>
+      <label class="filebtn">BIOS zip を登録<input type="file" id="biosFile" accept=".zip,.bin"></label>
+      <span class="sub" id="biosState" style="margin-left:8px"></span>
+
+      <label class="f">仮想パッド</label>
+      <select id="uiMode">
+        <option value="">自動判定</option>
+        <option value="mobile">常にタッチ用UI（iPad推奨）</option>
+        <option value="desktop">常にPC用UI</option>
+      </select>
+
+      <label class="f">Google OAuth クライアントID（ドライブ読み込みに必要）</label>
+      <input type="text" id="clientId" placeholder="xxxxxxxx.apps.googleusercontent.com" autocapitalize="off" spellcheck="false">
+      <label class="f">Google API キー（Picker 用）</label>
+      <input type="text" id="apiKey" placeholder="AIza..." autocapitalize="off" spellcheck="false">
+      <p class="help">Google Cloud で「Drive API」「Picker API」を有効化し、OAuth クライアントの承認済みオリジンにこのページのURLを登録してください。入力内容はこの端末内にのみ保存されます。</p>
+    </div>
+  </details>
+</section>
+
+<!-- ============ 実行画面 ============ -->
+<section id="runner" class="hidden">
+  <div id="screen"></div>
+
+  <div class="legend">速度</div>
+  <div class="switch" id="speed">
+    <button data-s="1" aria-pressed="true">1×</button>
+    <button data-s="2" aria-pressed="false">2×</button>
+    <button data-s="4" aria-pressed="false">4×</button>
+    <button data-s="8" aria-pressed="false">8×</button>
+  </div>
+  <p class="note" id="speedNote"></p>
+
+  <div class="legend">セーブ枠</div>
+  <div class="slots" id="slots"></div>
+
+  <div class="row" style="margin-top:16px">
+    <button id="fsBtn">全画面</button>
+    <button id="backBtn">別のROMを選ぶ</button>
+  </div>
+</section>
+
+</div>
+<div id="toast"></div>
+
+<script>
+/* =========================================================
+   カートリッジ棚 — EmulatorJS(RetroArch WASM) フロントエンド
+   ROM切替はページ再読込方式（コアの取り違えを防ぐため）
+   ========================================================= */
+const EJS_CDN = "https://cdn.emulatorjs.org/stable/data/";
+const $ = s => document.querySelector(s);
+const toastEl = $("#toast");
+let toastT;
+function toast(m){ toastEl.textContent=m; toastEl.classList.add("show");
+  clearTimeout(toastT); toastT=setTimeout(()=>toastEl.classList.remove("show"),2600); }
+
+/* ---------- IndexedDB ---------- */
+function db(){return new Promise((res,rej)=>{const r=indexedDB.open("cart-shelf",1);
+  r.onupgradeneeded=()=>{const d=r.result;
+    if(!d.objectStoreNames.contains("kv"))d.createObjectStore("kv");
+    if(!d.objectStoreNames.contains("states"))d.createObjectStore("states");};
+  r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error);});}
+async function dbGet(st,k){const d=await db();return new Promise((res,rej)=>{
+  const q=d.transaction(st).objectStore(st).get(k);q.onsuccess=()=>res(q.result);q.onerror=()=>rej(q.error);});}
+async function dbPut(st,k,v){const d=await db();return new Promise((res,rej)=>{
+  const q=d.transaction(st,"readwrite").objectStore(st).put(v,k);q.onsuccess=()=>res();q.onerror=()=>rej(q.error);});}
+async function dbDel(st,k){const d=await db();return new Promise((res,rej)=>{
+  const q=d.transaction(st,"readwrite").objectStore(st).delete(k);q.onsuccess=()=>res();q.onerror=()=>rej(q.error);});}
+
+/* ---------- 設定（この端末内） ---------- */
+const cfg = {
+  get(k,d){ try{ return localStorage.getItem("cs:"+k) ?? d; }catch(e){ return d; } },
+  set(k,v){ try{ localStorage.setItem("cs:"+k,v); }catch(e){} }
+};
+
+/* ---------- 通信状態 ---------- */
+function paintNet(){ const on=navigator.onLine;
+  $("#net").classList.toggle("on",on); $("#netTxt").textContent=on?"オンライン":"オフライン";
+  $("#driveBtn").disabled=!on;
+  $("#pickNote").textContent = on ? "" : "オフライン中：ドライブ読み込みは使えません。端末内のROMと保存済みコアのみ動きます。"; }
+addEventListener("online",paintNet); addEventListener("offline",paintNet); paintNet();
+
+/* ---------- 拡張子 → 機種 ---------- */
+const SYS = { nes:"nes", fds:"nes", smc:"snes", sfc:"snes", gba:"gba", nds:"nds" };
+function sysOf(name){ const e=(name.split(".").pop()||"").toLowerCase(); return SYS[e]||null; }
+function coreOf(sys){ return sys==="nds" ? cfg.get("ndsCore","desmume2015") : sys; }
+function hash(name,buf){ // 保存枠のキー用の軽量ハッシュ
+  const v=new Uint8Array(buf); let h=0x811c9dc5;
+  const step=Math.max(1,Math.floor(v.length/4096));
+  for(let i=0;i<v.length;i+=step){ h^=v[i]; h=(h*0x01000193)>>>0; }
+  h^=v.length; h=(h*0x01000193)>>>0;
+  for(let i=0;i<name.length;i++){ h^=name.charCodeAt(i); h=(h*0x01000193)>>>0; }
+  return h.toString(16).padStart(8,"0"); }
+
+/* ---------- 起動済み機種のラベル ---------- */
+function paintReady(){ document.querySelectorAll("[data-ready]").forEach(el=>{
+  const ok=cfg.get("ready:"+el.dataset.ready)==="1";
+  el.textContent = ok?"保存済み — オフライン可":"未起動";
+  el.classList.toggle("ready",ok); }); }
+paintReady();
+
+/* ---------- ROM を積んで再読込 ---------- */
+async function stage(name, buf, sysHint){
+  const sys = sysHint || sysOf(name);
+  if(!sys){ toast("機種が判別できません（.nes .smc .sfc .gba .nds）"); return; }
+  await dbPut("kv","rom",{name, buf, sys, at:Date.now()});
+  location.reload();
+}
+
+/* ---------- 端末内ファイル ---------- */
+$("#localFile").addEventListener("change", async e=>{
+  const f=e.target.files[0]; if(!f) return;
+  toast("読み込み中…");
+  await stage(f.name, await f.arrayBuffer());
+});
+
+/* ---------- BIOS 登録 ---------- */
+$("#biosFile").addEventListener("change", async e=>{
+  const f=e.target.files[0]; if(!f) return;
+  await dbPut("kv","bios",{name:f.name, buf:await f.arrayBuffer()});
+  paintBios(); toast("BIOS を登録しました");
+});
+async function paintBios(){ const b=await dbGet("kv","bios");
+  $("#biosState").textContent = b ? "登録済み: "+b.name : "未登録"; }
+
+/* ---------- 設定UIの束ね ---------- */
+[["ndsCore","desmume2015"],["uiMode",""],["clientId",""],["apiKey",""]].forEach(([id,d])=>{
+  const el=$("#"+id); el.value=cfg.get(id,d);
+  el.addEventListener("change",()=>cfg.set(id,el.value));
+});
+
+/* =========================================================
+   Google ドライブ
+   ========================================================= */
+function loadScript(src){ return new Promise((res,rej)=>{
+  const s=document.createElement("script"); s.src=src; s.async=true;
+  s.onload=res; s.onerror=()=>rej(new Error("読み込み失敗: "+src)); document.head.appendChild(s); }); }
+let token=null;
+$("#driveBtn").addEventListener("click", async ()=>{
+  const cid=cfg.get("clientId",""), key=cfg.get("apiKey","");
+  if(!cid||!key){ toast("設定でクライアントIDとAPIキーを入れてください"); $("details").open=true; return; }
+  try{
+    $("#driveBtn").disabled=true; toast("ドライブに接続中…");
+    if(!window.google?.accounts?.oauth2) await loadScript("https://accounts.google.com/gsi/client");
+    if(!window.gapi) await loadScript("https://apis.google.com/js/api.js");
+    await new Promise(r=>gapi.load("picker",r));
+    if(!token){
+      token = await new Promise((res,rej)=>{
+        google.accounts.oauth2.initTokenClient({
+          client_id:cid, scope:"https://www.googleapis.com/auth/drive.readonly",
+          callback:r=> r.access_token?res(r.access_token):rej(new Error("認証が取り消されました"))
+        }).requestAccessToken();
+      });
+    }
+    new google.picker.PickerBuilder()
+      .setOAuthToken(token).setDeveloperKey(key)
+      .addView(new google.picker.DocsView(google.picker.ViewId.DOCS).setIncludeFolders(true).setSelectFolderEnabled(false))
+      .setCallback(async d=>{
+        if(d.action!==google.picker.Action.PICKED) return;
+        const f=d.docs[0]; toast("ダウンロード中: "+f.name);
+        const r=await fetch("https://www.googleapis.com/drive/v3/files/"+f.id+"?alt=media",
+          {headers:{Authorization:"Bearer "+token}});
+        if(!r.ok){ toast("ダウンロード失敗 ("+r.status+")"); return; }
+        await stage(f.name, await r.arrayBuffer());
+      }).build().setVisible(true);
+  }catch(err){ toast(err.message||"ドライブに接続できません"); }
+  finally{ $("#driveBtn").disabled=!navigator.onLine; }
+});
+
+/* =========================================================
+   起動
+   ========================================================= */
+let ROMKEY="", ROMNAME="";
+async function boot(){
+  const rec=await dbGet("kv","rom");
+  await paintBios();
+  if(!rec) return;
+
+  ROMNAME=rec.name; ROMKEY=hash(rec.name,rec.buf);
+  $("#picker").classList.add("hidden"); $("#runner").classList.remove("hidden");
+  renderSlots();
+
+  const bios=await dbGet("kv","bios");
+  window.EJS_player="#screen";
+  window.EJS_pathtodata=EJS_CDN;
+  window.EJS_core=coreOf(rec.sys);
+  window.EJS_gameUrl=URL.createObjectURL(new Blob([rec.buf]));
+  window.EJS_gameName=rec.name.replace(/\.[^.]+$/,"");
+  window.EJS_language="ja-JP";
+  window.EJS_color="#c9a227";
+  window.EJS_startButtonName="はじめる";
+  window.EJS_backgroundColor="#0c0e12";
+  window.EJS_volume=0.6;
+  window.EJS_cacheConfig={enabled:true,cacheMaxSizeMB:4096,cacheMaxAgeMins:525600};
+  const um=cfg.get("uiMode",""); if(um) window.EJS_browserMode=um;
+  if(bios && EJS_core==="melonds") window.EJS_biosUrl=URL.createObjectURL(new Blob([bios.buf]));
+  window.EJS_onGameStart=()=>{ cfg.set("ready:"+rec.sys,"1"); applySpeed(currentSpeed,true); };
+
+  try{ await loadScript(EJS_CDN+"loader.js"); }
+  catch(e){ toast(navigator.onLine?"エミュレータ本体を読み込めません":"この機種はまだ端末に保存されていません（オンラインで一度起動が必要）"); }
+}
+
+/* ---------- 速度 ---------- */
+let currentSpeed=1;
+function applySpeed(n,quiet){
+  const gm=window.EJS_emulator?.gameManager; let ok=false;
+  try{
+    if(gm){
+      if(n===1){ gm.setFastForwardRatio?.(1); gm.toggleFastForward?.(0); ok=true; }
+      else { gm.setFastForwardRatio?.(n); gm.toggleFastForward?.(1); ok=true; }
+    }
+  }catch(e){ ok=false; }
+  if(!ok){ try{
+    EJS_emulator.changeSettingOption("ff-ratio",String(n));
+    EJS_emulator.changeSettingOption("ff", n===1?"disabled":"enabled"); ok=true;
+  }catch(e){} }
+  $("#speedNote").textContent = ok
+    ? (n>2 ? "※ "+n+"× は目標値です。DS/GBA は端末の処理能力が上限になります。" : "")
+    : "この版では速度APIが呼べません。歯車メニュー内の Fast Forward Ratio を使ってください。";
+  if(!quiet && ok) toast(n+"× で実行中");
+}
+$("#speed").addEventListener("click",e=>{
+  const b=e.target.closest("button[data-s]"); if(!b) return;
+  currentSpeed=+b.dataset.s;
+  $("#speed").querySelectorAll("button").forEach(x=>x.setAttribute("aria-pressed",String(x===b)));
+  applySpeed(currentSpeed);
+});
+
+/* ---------- セーブ枠 ---------- */
+const SLOTS=[1,2,3,4];
+async function renderSlots(){
+  const host=$("#slots"); host.innerHTML="";
+  for(const n of SLOTS){
+    const rec=await dbGet("states",ROMKEY+":"+n);
+    const el=document.createElement("div");
+    el.className="slot"+(rec?" filled":"");
+    el.innerHTML=`<div class="thumb" style="${rec?.thumb?`background-image:url(${rec.thumb})`:""}"></div>
+      <div class="meta"><div class="n">枠 ${n}</div>
+      <div class="t">${rec?new Date(rec.at).toLocaleString("ja-JP",{month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"}):"空き"}</div></div>
+      <div class="acts"><button data-save="${n}">保存</button>
+      <button data-load="${n}" ${rec?"":"disabled"}>読込</button></div>`;
+    host.appendChild(el);
+  }
+}
+$("#slots").addEventListener("click", async e=>{
+  const s=e.target.closest("[data-save]"), l=e.target.closest("[data-load]");
+  const gm=window.EJS_emulator?.gameManager;
+  if(!gm){ toast("ゲームを開始してから操作してください"); return; }
+  try{
+    if(s){
+      const n=+s.dataset.save;
+      const state=await gm.getState();
+      let thumb=""; try{ thumb=EJS_emulator.canvas.toDataURL("image/jpeg",0.5); }catch(_){}
+      await dbPut("states",ROMKEY+":"+n,{state,thumb,at:Date.now(),name:ROMNAME});
+      await renderSlots(); toast("枠 "+n+" に保存しました");
+    }
+    if(l){
+      const n=+l.dataset.load;
+      const rec=await dbGet("states",ROMKEY+":"+n);
+      if(!rec){ toast("枠 "+n+" は空です"); return; }
+      await gm.loadState(rec.state); toast("枠 "+n+" を読み込みました");
+    }
+  }catch(err){ toast("状態の保存・読込に失敗しました（歯車メニューの保存機能をお試しください）"); }
+});
+
+/* ---------- 全画面 / 戻る ---------- */
+$("#fsBtn").addEventListener("click",()=>{
+  const el=$("#screen");
+  if(document.fullscreenElement||document.webkitFullscreenElement){ (document.exitFullscreen||document.webkitExitFullscreen).call(document); }
+  else { (el.requestFullscreen||el.webkitRequestFullscreen)?.call(el); }
+});
+$("#backBtn").addEventListener("click", async ()=>{
+  await dbDel("kv","rom"); location.reload();
+});
+
+/* ---------- Service Worker（オフライン用） ---------- */
+if("serviceWorker" in navigator && location.protocol==="https:"){
+  addEventListener("load",()=>navigator.serviceWorker.register("./sw.js").catch(()=>{}));
+}
+
+boot();
+</script>
+</body>
+</html>
