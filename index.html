@@ -149,6 +149,12 @@ p.help{font-size:12.5px;color:var(--dim);line-height:1.7;margin:8px 0 0}
       <label class="filebtn">BIOS zip を登録<input type="file" id="biosFile" accept=".zip,.bin"></label>
       <span class="sub" id="biosState" style="margin-left:8px"></span>
 
+      <label class="f">詳細ログ（不具合調査用・ブラウザのコンソールに出力）</label>
+      <select id="debug">
+        <option value="">オフ</option>
+        <option value="1">オン</option>
+      </select>
+
       <label class="f">仮想パッド</label>
       <select id="uiMode">
         <option value="">自動判定</option>
@@ -272,7 +278,7 @@ async function paintBios(){ const b=await dbGet("kv","bios");
   $("#biosState").textContent = b ? "登録済み: "+b.name : "未登録"; }
 
 /* ---------- 設定UIの束ね ---------- */
-[["ndsCore","desmume2015"],["uiMode",""],["clientId",""],["apiKey",""]].forEach(([id,d])=>{
+[["ndsCore","desmume2015"],["uiMode",""],["debug",""],["clientId",""],["apiKey",""]].forEach(([id,d])=>{
   const el=$("#"+id); el.value=cfg.get(id,d);
   el.addEventListener("change",()=>cfg.set(id,el.value));
 });
@@ -332,7 +338,7 @@ async function boot(){
   window.EJS_player="#screen";
   window.EJS_pathtodata=EJS_CDN;
   window.EJS_core=coreOf(rec.sys);
-  window.EJS_gameUrl=URL.createObjectURL(new Blob([rec.buf]));
+  window.EJS_gameUrl=new File([rec.buf], rec.name, {type:"application/octet-stream"});
   window.EJS_gameName=rec.name.replace(/\.[^.]+$/,"");
   window.EJS_language="ja-JP";
   window.EJS_color="#c9a227";
@@ -341,7 +347,9 @@ async function boot(){
   window.EJS_volume=0.6;
   window.EJS_cacheConfig={enabled:true,cacheMaxSizeMB:4096,cacheMaxAgeMins:525600};
   const um=cfg.get("uiMode",""); if(um) window.EJS_browserMode=um;
-  if(bios && EJS_core==="melonds") window.EJS_biosUrl=URL.createObjectURL(new Blob([bios.buf]));
+  if(cfg.get("debug","")==="1") window.EJS_DEBUG_XX=true;
+  if(bios && window.EJS_core==="melonds") window.EJS_biosUrl=new File([bios.buf], bios.name, {type:"application/octet-stream"});
+  if(!bios && window.EJS_core==="melonds") toast("melonDS には BIOS が必要です。設定で登録するか desmume2015 に切り替えてください");
   window.EJS_onGameStart=()=>{ cfg.set("ready:"+rec.sys,"1"); applySpeed(currentSpeed,true); };
 
   try{ await loadScript(EJS_CDN+"loader.js"); }
