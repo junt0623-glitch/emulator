@@ -87,16 +87,104 @@ button.key{border-color:#5c5231;background:linear-gradient(#3a3421,#2b2718);colo
 .slot .acts button{padding:6px 9px;min-height:32px;font-size:12px}
 
 /* ---- screen ---- */
+#bar{display:flex;gap:8px;align-items:center;margin:0 0 12px}
+#bar button{padding:9px 13px;min-height:40px;font-size:13px;white-space:nowrap}
+#romTitle{font-family:var(--mono);font-size:11px;color:var(--dim);flex:1;min-width:0;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#menuBtn,#deckClose,.pad-side,#deckBg{display:none}
 #screenWrap{position:relative}
 #screen{background:#0c0e12;border:1px solid var(--edge);border-radius:6px;overflow:hidden;
   width:100%;aspect-ratio:4/3;max-height:70dvh}
 #screen:fullscreen{border:0;border-radius:0;max-height:none;aspect-ratio:auto;height:100%}
+#stage:fullscreen{background:var(--chassis)}
 #tapStart{position:absolute;inset:0;width:100%;height:100%;z-index:50;border:0;border-radius:6px;
   background:rgba(12,14,18,.6);color:var(--ivory);font-family:var(--body);font-size:17px;
   letter-spacing:.08em;display:flex;align-items:center;justify-content:center;gap:10px;
   cursor:pointer;-webkit-tap-highlight-color:transparent}
 #tapStart::before{content:"▶";color:var(--brass);font-size:15px}
 .hidden{display:none!important}
+
+/* =========================================================
+   タッチ操作パッド（画面に重ねず、画面の外側に配置する）
+   縦持ち：画面の下に左右2列／横持ち：画面の左右に振り分け
+   ========================================================= */
+body.pad-on{overflow:hidden}
+body.pad-on #stage{
+  position:fixed;inset:0;z-index:40;background:var(--chassis);display:grid;gap:8px;
+  padding:calc(6px + env(safe-area-inset-top)) calc(8px + env(safe-area-inset-right))
+          calc(8px + env(safe-area-inset-bottom)) calc(8px + env(safe-area-inset-left));
+  --side:clamp(150px,21.5vw,255px);   /* 横持ちで画面の左右に確保する幅 */
+}
+body.pad-on #bar{grid-area:bar;margin:0}
+body.pad-on #menuBtn,body.pad-on #deckClose{display:inline-flex}
+body.pad-on #screenWrap{grid-area:scr;margin-inline:auto;max-width:100%}
+body.pad-on #screen{max-height:none}
+body.pad-on .pad-side{grid-area:padl;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:10px;min-width:0;
+  touch-action:none;-webkit-user-select:none;user-select:none}
+body.pad-on .pad-r{grid-area:padr}
+/* EmulatorJS 内蔵の仮想パッドは画面に重なるので、自前パッド使用時は隠す */
+body.pad-on .ejs_virtualGamepad_parent,
+body.pad-on [class*="virtualGamepad"]{display:none!important}
+
+@media (orientation:portrait){
+  body.pad-on #stage{grid-template-columns:1fr 1fr;grid-template-rows:auto auto 1fr;
+    grid-template-areas:"bar bar" "scr scr" "padl padr";
+    --cluster:clamp(128px,min(38vw,26dvh),230px)}
+  body.pad-on #screenWrap{width:min(100%,calc((100dvh - 340px) * 4 / 3))}
+}
+@media (orientation:landscape){
+  body.pad-on #stage{
+    grid-template-columns:1fr min(calc((100dvh - 76px) * 4 / 3),calc(100vw - 2 * var(--side))) 1fr;
+    grid-template-rows:auto 1fr;
+    grid-template-areas:"bar bar bar" "padl scr padr";
+    --cluster:clamp(120px,min(calc(var(--side) - 40px),26dvh),220px)}
+  body.pad-on #screenWrap{width:100%;margin:auto}
+  /* 端末を両手で持ったときの親指の位置に合わせて、やや下寄せ */
+  body.pad-on .pad-side{justify-content:flex-end;padding-bottom:min(9dvh,64px)}
+}
+
+/* --- 十字キー --- */
+.dpad{position:relative;width:var(--cluster);height:var(--cluster);flex:none;touch-action:none}
+.dpad::before,.dpad::after{content:"";position:absolute;border:1px solid var(--edge);border-radius:10px;
+  background:linear-gradient(#2f3644,#232935)}
+.dpad::before{left:33%;right:33%;top:0;bottom:0}
+.dpad::after{top:33%;bottom:33%;left:0;right:0}
+.dpad .hub{position:absolute;inset:33%;z-index:1;background:#2b323f}
+.dp{position:absolute;z-index:2;display:flex;align-items:center;justify-content:center;
+  color:#7d879a;font-size:12px;border-radius:9px}
+.dp.up{left:33%;right:33%;top:0;height:34%}
+.dp.down{left:33%;right:33%;bottom:0;height:34%}
+.dp.left{top:33%;bottom:33%;left:0;width:34%}
+.dp.right{top:33%;bottom:33%;right:0;width:34%}
+
+/* --- アクションボタン --- */
+.face{position:relative;width:var(--cluster);height:var(--cluster);flex:none;touch-action:none}
+.fb{position:absolute;width:43%;height:43%;min-height:0;padding:0;border-radius:50%;
+  font-family:var(--mono);font-size:15px;letter-spacing:.02em;
+  background:linear-gradient(#333b4b,#232935);border:1px solid var(--edge);color:#c3cbd9}
+.fb.x{top:0;left:28.5%} .fb.y{left:0;top:28.5%}
+.fb.a{right:0;top:28.5%} .fb.b{bottom:0;left:28.5%}
+.fb.a,.fb.b{border-color:#5c5231;color:#f0dfa8}
+.shoulder{width:min(100%,calc(var(--cluster) + 34px));min-height:44px;border-radius:9px;
+  font-family:var(--mono);font-size:13px;letter-spacing:.1em}
+.sys{min-height:38px;padding:0 20px;border-radius:19px;
+  font-family:var(--mono);font-size:11px;letter-spacing:.14em}
+.dp.on,.fb.on,.sys.on,.shoulder.on{background:linear-gradient(#e5cb63,#c9a227);color:#1b1e24;
+  border-color:#8d7420;box-shadow:inset 0 1px 0 #fff8,0 0 12px rgba(201,162,39,.35)}
+/* ファミコンは A/B のみ（X/Y/L/R は無い） */
+body.sys-nes .shoulder,body.sys-nes .fb.x,body.sys-nes .fb.y{display:none}
+body.sys-nes .fb.a{width:50%;height:50%;top:16%;right:0}
+body.sys-nes .fb.b{width:50%;height:50%;bottom:16%;left:0}
+
+/* --- 速度・セーブ枠（パッド時はボトムシート） --- */
+body.pad-on #deck{position:fixed;left:0;right:0;bottom:0;z-index:65;
+  background:var(--panel2);border-top:1px solid var(--edge);border-radius:14px 14px 0 0;
+  padding:10px 16px calc(18px + env(safe-area-inset-bottom));
+  max-height:80dvh;overflow:auto;box-shadow:0 -10px 34px #000a;
+  transform:translateY(102%);transition:transform .22s ease}
+body.pad-on #deck.open{transform:none}
+body.pad-on #deckBg.open{display:block;position:fixed;inset:0;z-index:60;background:#0009}
 
 /* ---- panels ---- */
 details{border:1px solid var(--edge);border-radius:5px;background:var(--panel2);margin-top:12px}
@@ -137,6 +225,9 @@ p.help{font-size:12.5px;color:var(--dim);line-height:1.7;margin:8px 0 0}
   </div>
   <p class="note" id="pickNote"></p>
 
+  <div class="legend">タッチ操作</div>
+  <p class="help">iPad などのタッチ端末では、起動すると<b>十字キーとボタンが画面の外側に並ぶ配置</b>になります（ゲーム画面には重なりません）。縦持ちなら画面の下、横持ちなら画面の左右に振り分けて表示され、スクロールなしで操作できます。速度やセーブ枠は上部の「メニュー」から開けます。</p>
+
   <div class="legend">オフラインの準備</div>
   <p class="help">各機種を <b>一度オンラインで起動</b> すると、その機種のコアが端末内に保存されます。以降は機内モードでも同じ機種が動きます。ラベルの表示が「保存済み」に変わります。ホーム画面に追加すると全画面アプリとして開けます。</p>
 
@@ -149,11 +240,11 @@ p.help{font-size:12.5px;color:var(--dim);line-height:1.7;margin:8px 0 0}
         <option value="1">オン</option>
       </select>
 
-      <label class="f">仮想パッド</label>
+      <label class="f">タッチ操作パッド</label>
       <select id="uiMode">
-        <option value="">自動判定</option>
-        <option value="mobile">常にタッチ用UI（iPad推奨）</option>
-        <option value="desktop">常にPC用UI</option>
+        <option value="">自動判定（タッチ端末では表示）</option>
+        <option value="mobile">常に表示（iPad推奨）</option>
+        <option value="desktop">表示しない（キーボードで操作）</option>
       </select>
 
       <label class="f">Google OAuth クライアントID（ドライブ読み込みに必要）</label>
@@ -167,26 +258,63 @@ p.help{font-size:12.5px;color:var(--dim);line-height:1.7;margin:8px 0 0}
 
 <!-- ============ 実行画面 ============ -->
 <section id="runner" class="hidden">
-  <div id="screenWrap">
-    <div id="screen"></div>
-    <button id="tapStart" type="button">タップして開始</button>
+  <div id="stage">
+    <div id="bar">
+      <button id="backBtn">‹ ROM選択</button>
+      <span id="romTitle"></span>
+      <button id="padBtn" aria-pressed="false">パッド</button>
+      <button id="fsBtn">全画面</button>
+      <button id="menuBtn">メニュー</button>
+    </div>
+
+    <div id="screenWrap">
+      <div id="screen"></div>
+      <button id="tapStart" type="button">タップして開始</button>
+    </div>
+
+    <!-- 左：L / 十字キー / SELECT -->
+    <div class="pad-side pad-l">
+      <button class="shoulder" type="button" data-btn="10">L</button>
+      <div class="dpad" id="dpad">
+        <i class="hub"></i>
+        <span class="dp up"    data-btn="4">▲</span>
+        <span class="dp down"  data-btn="5">▼</span>
+        <span class="dp left"  data-btn="6">◀</span>
+        <span class="dp right" data-btn="7">▶</span>
+      </div>
+      <button class="sys" type="button" data-btn="2">SELECT</button>
+    </div>
+
+    <!-- 右：R / A・B・X・Y / START -->
+    <div class="pad-side pad-r">
+      <button class="shoulder" type="button" data-btn="11">R</button>
+      <div class="face">
+        <button class="fb x" type="button" data-btn="9">X</button>
+        <button class="fb y" type="button" data-btn="1">Y</button>
+        <button class="fb a" type="button" data-btn="8">A</button>
+        <button class="fb b" type="button" data-btn="0">B</button>
+      </div>
+      <button class="sys" type="button" data-btn="3">START</button>
+    </div>
   </div>
 
-  <div class="legend">速度</div>
-  <div class="switch" id="speed">
-    <button data-s="1" aria-pressed="true">1×</button>
-    <button data-s="2" aria-pressed="false">2×</button>
-    <button data-s="4" aria-pressed="false">4×</button>
-    <button data-s="8" aria-pressed="false">8×</button>
-  </div>
-  <p class="note" id="speedNote"></p>
+  <div id="deckBg"></div>
+  <div id="deck">
+    <div class="legend">速度</div>
+    <div class="switch" id="speed">
+      <button data-s="1" aria-pressed="true">1×</button>
+      <button data-s="2" aria-pressed="false">2×</button>
+      <button data-s="4" aria-pressed="false">4×</button>
+      <button data-s="8" aria-pressed="false">8×</button>
+    </div>
+    <p class="note" id="speedNote"></p>
 
-  <div class="legend">セーブ枠</div>
-  <div class="slots" id="slots"></div>
+    <div class="legend">セーブ枠</div>
+    <div class="slots" id="slots"></div>
 
-  <div class="row" style="margin-top:16px">
-    <button id="fsBtn">全画面</button>
-    <button id="backBtn">別のROMを選ぶ</button>
+    <div class="row" style="margin-top:16px">
+      <button id="deckClose">閉じる</button>
+    </div>
   </div>
 </section>
 
@@ -290,7 +418,10 @@ $("#localFile").addEventListener("change", async e=>{
 /* ---------- 設定UIの束ね ---------- */
 [["uiMode",""],["debug",""],["clientId",""],["apiKey",""]].forEach(([id,d])=>{
   const el=$("#"+id); el.value=cfg.get(id,d);
-  el.addEventListener("change",()=>cfg.set(id,el.value));
+  el.addEventListener("change",()=>{
+    cfg.set(id,el.value);
+    if(id==="uiMode") cfg.set("pad","");   // 実行画面での一時トグルを解除
+  });
 });
 
 /* =========================================================
@@ -341,6 +472,9 @@ async function boot(){
 
   ROMNAME=rec.name; ROMKEY=hash(rec.name,rec.buf);
   $("#picker").classList.add("hidden"); $("#runner").classList.remove("hidden");
+  $("#romTitle").textContent=rec.name;
+  document.body.classList.add("sys-"+rec.sys);
+  setPad(padWanted());
   renderSlots();
 
   window.EJS_player="#screen";
@@ -356,7 +490,13 @@ async function boot(){
   window.EJS_cacheConfig={enabled:true,cacheMaxSizeMB:4096,cacheMaxAgeMins:525600};
   const um=cfg.get("uiMode",""); if(um) window.EJS_browserMode=um;
   if(cfg.get("debug","")==="1") window.EJS_DEBUG_XX=true;
-  window.EJS_onGameStart=()=>{ cfg.set("ready:"+rec.sys,"1"); applySpeed(currentSpeed,true); $("#tapStart").classList.add("hidden"); };
+  // 自前パッドを使うときは EmulatorJS 内蔵の重ね置きパッドを出さない
+  if(padWanted()) window.EJS_defaultOptions=Object.assign({},window.EJS_defaultOptions,{"virtual-gamepad":"disabled"});
+  window.EJS_onGameStart=()=>{
+    cfg.set("ready:"+rec.sys,"1"); applySpeed(currentSpeed,true);
+    $("#tapStart").classList.add("hidden");
+    setPad(document.body.classList.contains("pad-on"));   // 内蔵パッド設定を再適用＋採寸
+  };
 
   try{ await loadScript(EJS_CDN+"loader.js"); }
   catch(e){ toast(navigator.onLine?"エミュレータ本体を読み込めません":"この機種はまだ端末に保存されていません（オンラインで一度起動が必要）"); }
@@ -387,6 +527,133 @@ $("#speed").addEventListener("click",e=>{
   $("#speed").querySelectorAll("button").forEach(x=>x.setAttribute("aria-pressed",String(x===b)));
   applySpeed(currentSpeed);
 });
+
+/* =========================================================
+   タッチ操作パッド
+   ・ゲーム画面には一切重ねず、画面の外側（下 or 左右）に置く
+   ・入力は RetroPad のボタン番号で gameManager.simulateInput() に送る
+     0:B 1:Y 2:SELECT 3:START 4:上 5:下 6:左 7:右 8:A 9:X 10:L 11:R
+   ・simulateInput が使えない版のために、キーイベント送出の保険を持つ
+   ========================================================= */
+const BTN={B:0,Y:1,SELECT:2,START:3,UP:4,DOWN:5,LEFT:6,RIGHT:7,A:8,X:9,L:10,R:11};
+const KEYCODE={0:88,1:83,2:86,3:13,4:38,5:40,6:37,7:39,8:90,9:65,10:81,11:69}; // x s v enter ↑↓←→ z a q e
+const KEYNAME={0:"x",1:"s",2:"v",3:"Enter",4:"ArrowUp",5:"ArrowDown",6:"ArrowLeft",7:"ArrowRight",
+               8:"z",9:"a",10:"q",11:"e"};
+
+function padSend(idx,down){
+  const gm=window.EJS_emulator&&window.EJS_emulator.gameManager;
+  if(gm&&typeof gm.simulateInput==="function"){
+    try{ gm.simulateInput(0,idx,down?1:0); return; }catch(e){}
+  }
+  const kc=KEYCODE[idx]; if(!kc) return;
+  try{ window.dispatchEvent(new KeyboardEvent(down?"keydown":"keyup",
+    {key:KEYNAME[idx],keyCode:kc,which:kc,bubbles:true})); }catch(e){}
+}
+
+let padZones=[], padDpad=null, padPaintEls={};
+const padActive=new Map();      // pointerId → 押している番号の Set
+const padHeld={};               // 番号 → 押下中か
+
+function padMeasure(){
+  padZones=[]; padPaintEls={};
+  document.querySelectorAll("#stage [data-btn]").forEach(el=>{
+    const idx=+el.dataset.btn, r=el.getBoundingClientRect();
+    if(!r.width||!r.height) return;                 // 非表示（NESのX/Y/L/R等）
+    (padPaintEls[idx]=padPaintEls[idx]||[]).push(el);
+    if(!el.closest(".dpad")) padZones.push({idx,r}); // 十字キーは座標判定なので除外
+  });
+  const d=$("#dpad"), dr=d?d.getBoundingClientRect():null;
+  padDpad=(dr&&dr.width)?dr:null;
+}
+
+/* 座標 → 押している番号（十字キーは8方向・斜め対応） */
+function padHit(x,y){
+  const out=[];
+  if(padDpad){
+    const r=padDpad, hw=r.width/2, hh=r.height/2;
+    const dx=(x-(r.left+hw))/hw, dy=(y-(r.top+hh))/hh;
+    if(Math.abs(dx)<=1.15&&Math.abs(dy)<=1.15){     // 少し広めに当たりを取る
+      const ax=Math.abs(dx), ay=Math.abs(dy);
+      if(Math.hypot(dx,dy)>=0.2){                   // 中心は無反応
+        if(ax>0.55*ay) out.push(dx>0?BTN.RIGHT:BTN.LEFT);
+        if(ay>0.55*ax) out.push(dy>0?BTN.DOWN:BTN.UP);
+      }
+      return out;
+    }
+  }
+  for(const z of padZones){
+    const r=z.r, m=6;
+    if(x>=r.left-m&&x<=r.right+m&&y>=r.top-m&&y<=r.bottom+m){ out.push(z.idx); break; }
+  }
+  return out;
+}
+
+function padApply(){
+  const want={};
+  padActive.forEach(set=>set.forEach(i=>{want[i]=1;}));
+  for(let i=0;i<12;i++){
+    const on=!!want[i];
+    if(on===!!padHeld[i]) continue;
+    padHeld[i]=on; padSend(i,on);
+    (padPaintEls[i]||[]).forEach(el=>el.classList.toggle("on",on));
+  }
+}
+function padRelease(){ padActive.clear(); padApply(); }
+
+function padDown(e){
+  if(!document.body.classList.contains("pad-on")) return;
+  if(!padActive.size) padMeasure();               // 直前に採寸（回転・全画面切替に追従）
+  const hit=padHit(e.clientX,e.clientY);
+  if(!hit.length) return;                          // 画面側のタップは邪魔しない
+  e.preventDefault();
+  padActive.set(e.pointerId,new Set(hit)); padApply();
+}
+function padMove(e){
+  if(!padActive.has(e.pointerId)) return;
+  e.preventDefault();
+  padActive.set(e.pointerId,new Set(padHit(e.clientX,e.clientY))); padApply();
+}
+function padUp(e){ if(padActive.delete(e.pointerId)) padApply(); }
+
+$("#stage").addEventListener("pointerdown",padDown,{passive:false});
+addEventListener("pointermove",padMove,{passive:false});
+addEventListener("pointerup",padUp);
+addEventListener("pointercancel",padUp);
+addEventListener("blur",padRelease);
+addEventListener("visibilitychange",()=>{ if(document.hidden) padRelease(); });  // 押しっぱなし防止
+["resize","orientationchange","fullscreenchange","webkitfullscreenchange"]
+  .forEach(ev=>addEventListener(ev,()=>{ padRelease(); setTimeout(padMeasure,120); }));
+
+function padWanted(){
+  const ov=cfg.get("pad","");                      // 実行画面のトグルが最優先
+  if(ov==="1") return true;
+  if(ov==="0") return false;
+  const um=cfg.get("uiMode","");
+  if(um==="mobile") return true;
+  if(um==="desktop") return false;
+  return matchMedia("(pointer:coarse)").matches || navigator.maxTouchPoints>0;
+}
+function setPad(on){
+  padRelease();
+  document.body.classList.toggle("pad-on",on);
+  $("#padBtn").setAttribute("aria-pressed",String(on));
+  try{ window.EJS_emulator.changeSettingOption("virtual-gamepad",on?"disabled":"enabled"); }catch(e){}
+  setTimeout(padMeasure,60);
+}
+$("#padBtn").addEventListener("click",()=>{
+  const on=!document.body.classList.contains("pad-on");
+  cfg.set("pad",on?"1":"0"); setPad(on);
+  toast(on?"タッチパッドを表示しました":"タッチパッドを隠しました");
+});
+
+/* ---------- メニュー（速度・セーブ枠） ---------- */
+function openDeck(on){
+  $("#deck").classList.toggle("open",on);
+  $("#deckBg").classList.toggle("open",on);
+}
+$("#menuBtn").addEventListener("click",()=>openDeck(!$("#deck").classList.contains("open")));
+$("#deckClose").addEventListener("click",()=>openDeck(false));
+$("#deckBg").addEventListener("click",()=>openDeck(false));
 
 /* ---------- セーブ枠 ---------- */
 const SLOTS=[1,2,3,4];
@@ -434,7 +701,8 @@ $("#tapStart").addEventListener("click", ()=>{
 });
 
 $("#fsBtn").addEventListener("click",()=>{
-  const el=$("#screen");
+  // パッド表示中は画面だけでなくパッドごと全画面にする（パッドが消えないように）
+  const el=document.body.classList.contains("pad-on")?$("#stage"):$("#screen");
   if(document.fullscreenElement||document.webkitFullscreenElement){ (document.exitFullscreen||document.webkitExitFullscreen).call(document); }
   else { (el.requestFullscreen||el.webkitRequestFullscreen)?.call(el); }
 });
