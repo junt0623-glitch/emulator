@@ -255,17 +255,39 @@ paintReady();
 
 /* ---------- ROM を積んで再読込 ---------- */
 async function stage(name, buf, sysHint){
+  console.log("[cart-shelf] stage() 開始:", name, buf.byteLength+" bytes");
   const sys = sysHint || sysOf(name);
+  console.log("[cart-shelf] 判定された機種:", sys);
   if(!sys){ toast("機種が判別できません（.nes .smc .sfc .gba .nds）"); return; }
-  await dbPut("kv","rom",{name, buf, sys, at:Date.now()});
+  try{
+    await dbPut("kv","rom",{name, buf, sys, at:Date.now()});
+    console.log("[cart-shelf] IndexedDB への保存に成功。ページを再読み込みします");
+  }catch(err){
+    console.error("[cart-shelf] IndexedDB への保存に失敗:", err);
+    toast("端末内保存でエラー: "+(err&&err.message?err.message:err));
+    return;
+  }
   location.reload();
 }
 
 /* ---------- 端末内ファイル ---------- */
+$("#localFile").addEventListener("click", ()=>{
+  console.log("[cart-shelf] ファイル選択ダイアログを開きます");
+});
 $("#localFile").addEventListener("change", async e=>{
-  const f=e.target.files[0]; if(!f) return;
-  toast("読み込み中…");
-  await stage(f.name, await f.arrayBuffer());
+  console.log("[cart-shelf] change イベント発生", e.target.files);
+  const f=e.target.files[0];
+  if(!f){ console.log("[cart-shelf] ファイルが選ばれていません（キャンセルされた可能性）"); return; }
+  console.log("[cart-shelf] 選択されたファイル:", f.name, f.size+" bytes", f.type);
+  try{
+    toast("読み込み中…");
+    const buf = await f.arrayBuffer();
+    console.log("[cart-shelf] arrayBuffer 読み込み完了:", buf.byteLength+" bytes");
+    await stage(f.name, buf);
+  }catch(err){
+    console.error("[cart-shelf] ファイル読み込みでエラー:", err);
+    toast("読み込みエラー: "+(err&&err.message?err.message:err));
+  }
 });
 
 /* ---------- BIOS 登録 ---------- */
