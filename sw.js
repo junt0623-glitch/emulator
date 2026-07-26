@@ -2,8 +2,8 @@
    ・アプリ本体（index.html）を保存
    ・EmulatorJS の本体スクリプト/CSS/翻訳を保存
    ・コア本体（/cores/）は EmulatorJS 自身が IndexedDB に保存するので二重に持たない */
-const SHELL = "shell-v4";
-const FRAME = "ejs-frame-v4";
+const SHELL = "shell-v5";
+const FRAME = "ejs-frame-v5";
 const CDN   = "https://cdn.emulatorjs.org/";
 
 self.addEventListener("install", e => {
