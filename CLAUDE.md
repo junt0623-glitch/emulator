@@ -1,0 +1,36 @@
+# CLAUDE.md — カートリッジ棚（cart-shelf-emulator）
+
+このリポジトリは、NES/SFCのROMをブラウザで動かす単一ページアプリ。
+GitHub Pages で公開し、iPad/Mac のブラウザから使う。**ローカル環境へのソフトインストールは禁止**のため、Claude Code は必ずクラウド版（`claude.ai/code`）で運用する前提。
+
+## ファイル構成
+- `index.html` — アプリ本体。UI・ROM選択・EmulatorJS初期化・セーブ管理まで全部ここ
+- `sw.js` — オフライン用 Service Worker。**同一オリジンの独立ファイルである必要があるため、index.html には統合できない**（唯一の単一HTML原則の例外）
+- `README.md` — セットアップ手順
+
+## アーキテクチャ上の決定事項
+- **単一HTML・外部依存ゼロ・ローカルインストール不要・オフライン対応**が全プロジェクト共通の絶対ルール（sw.jsのみ例外）
+- エミュレーション本体は自作せず [EmulatorJS](https://emulatorjs.org)（RetroArch WASM）をCDN経由で使用。`EJS_CDN = "https://cdn.emulatorjs.org/stable/data/"`
+- ROMは IndexedDB（`cart-shelf` DB, `kv`/`states` ストア）に保存
+- **ROM切替は必ず `location.reload()` を伴うページ再読込方式**。コアの取り違えを防ぐため、SPA的な差し替えはしない
+- ROMファイルは `Blob` ではなく **`File` オブジェクト**でEmulatorJSに渡すこと（`new File([buf], name, {...})`）。Blob URLは拡張子情報を失い、拡張子で機種判定するコア（過去にGBA/NDSで発生）が動かなくなる
+
+## 対応機種
+現在は **NES（.nes/.fds）と SFC（.smc/.sfc）のみ**。
+GBA/NDSは一度実装したが、施設のセキュリティソフト（ウイルスバスター for Mac）が特定のファイル形式のアップロードを静かにブロックする事例が確認され、切り分けが長期化したため撤去した。再度対応する場合はこの制約を前提に検証すること。
+
+## 既知の落とし穴（再発防止）
+1. **iOS Safariで `<input type="file" accept="...">` に独自拡張子（.nes等）を指定すると、ファイルがグレーアウトして選択不可になることがある**。`accept` 属性は付けず、選択後にJS側（`sysOf()`）で拡張子を検証する方式にしてある。この属性を安易に復活させないこと
+2. **EmulatorJSが内部生成する `.ejs_start_button` に、opacity:0の内部オーバーレイ（`.ejs_context_menu` 等）が重なり、実機タップが届かないことがある**（コンソールから `.click()` すると通ってしまうが、これは「本物のユーザー操作」と見なされずAudioContext等の権限エラーになるので偽陽性の確認方法にはならない）。対策として `#tapStart` という自前の全面オーバーレイボタンを `#screenWrap` 内に設置し、実タップを確実に拾って内部ボタンへ `.click()` で中継している。これを消さないこと
+3. **Service Workerはキャッシュを持つため、index.html / sw.js のどちらかを更新したら、`sw.js` 冒頭の `SHELL` / `FRAME` の版数（`shell-v6` など）を必ず1つ上げること**。上げ忘れると古いキャッシュが配信され続け、ユーザー側は「アップロードしたのに反映されない」状態になる
+4. デバッグ時、ブラウザの通常キャッシュクリアだけではService Workerのキャッシュは消えない。DevTools の Application → Service Workers → Unregister、または Storage → Clear site data が必要
+
+## 開発フロー
+1. `index.html` / `sw.js` を編集
+2. `sw.js` のバージョン番号（SHELL/FRAME）を上げる
+3. `node --check` で構文確認（script内容を抽出して確認する運用）
+4. GitHub Pages にpush → 動作確認は実機（iPad Safari / Mac Chrome）で行う。特にiOS Safariでの実機タップ挙動は開発機（Mac）だけでは再現できないことが多い
+
+## テスト環境の制約
+- ユーザーはmacOSのローカル開発環境を持たず、GitHubのWeb UIでファイルをアップロードして公開している
+- コード変更のたびに「GitHubにアップロード → Service Workerのキャッシュ更新 → 実機で再テスト」のサイクルが発生する。変更は一度にまとめて、テスト往復を最小化することが望ましい
