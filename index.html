@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <title>カートリッジ棚 — 携帯機エミュレータ</title>
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover, user-scalable=no">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -115,14 +115,26 @@ body.pad-on #stage{
           calc(8px + env(safe-area-inset-bottom)) calc(8px + env(safe-area-inset-left));
   --side:clamp(150px,21.5vw,255px);   /* 横持ちで画面の左右に確保する幅 */
 }
+body.pad-on #stage{touch-action:none}
+/* 画面とバーは従来どおりタップできる必要があるので、ここだけ戻す */
+body.pad-on #bar,body.pad-on #screenWrap{touch-action:manipulation}
 body.pad-on #bar{grid-area:bar;margin:0}
 body.pad-on #menuBtn,body.pad-on #deckClose{display:inline-flex}
 body.pad-on #screenWrap{grid-area:scr;margin-inline:auto;max-width:100%}
 body.pad-on #screen{max-height:none}
 body.pad-on .pad-side{grid-area:padl;display:flex;flex-direction:column;
-  align-items:center;justify-content:center;gap:10px;min-width:0;
-  touch-action:none;-webkit-user-select:none;user-select:none}
+  align-items:center;justify-content:center;gap:10px;min-width:0}
 body.pad-on .pad-r{grid-area:padr}
+/* iOS Safari のダブルタップ拡大・長押しメニュー対策。
+   touch-action は継承されないので、当たる可能性のある要素すべてに指定する */
+.pad-side,.pad-side *,.dpad,.dpad::before,.dpad::after,.face{
+  touch-action:none;-webkit-user-select:none;user-select:none;
+  -webkit-touch-callout:none;-webkit-tap-highlight-color:transparent}
+/* パッドの当たり判定は座標で行うので、子要素をタップ対象にする必要がない。
+   タップ対象を .pad-side ひとつに減らすと、iOS がボタンやspanを個別の
+   「ダブルタップで拡大する対象」と見なす余地がなくなる */
+.pad-side{pointer-events:auto}
+.pad-side *{pointer-events:none}
 /* EmulatorJS 内蔵の仮想パッドは画面に重なるので、自前パッド使用時は隠す */
 body.pad-on .ejs_virtualGamepad_parent,
 body.pad-on [class*="virtualGamepad"]{display:none!important}
@@ -356,7 +368,9 @@ const cfg = {
 function paintNet(){ const on=navigator.onLine;
   $("#net").classList.toggle("on",on); $("#netTxt").textContent=on?"オンライン":"オフライン";
   $("#driveBtn").disabled=!on;
-  $("#pickNote").textContent = on ? "" : "オフライン中：ドライブ読み込みは使えません。端末内のROMと保存済みコアのみ動きます。"; }
+  const note=$("#pickNote");
+  if(!on){ note.textContent="オフライン中：ドライブ読み込みは使えません。端末内のROMと保存済みコアのみ動きます。"; delete note.dataset.drive; }
+  else if(!note.dataset.drive){ note.textContent=""; } }   // ドライブ設定の案内は消さない
 addEventListener("online",paintNet); addEventListener("offline",paintNet); paintNet();
 
 /* ---------- 拡張子 → 機種 ---------- */
@@ -418,10 +432,16 @@ $("#localFile").addEventListener("change", async e=>{
 /* ---------- 設定UIの束ね ---------- */
 [["uiMode",""],["debug",""],["clientId",""],["apiKey",""]].forEach(([id,d])=>{
   const el=$("#"+id); el.value=cfg.get(id,d);
-  el.addEventListener("change",()=>{
+  const save=()=>{
     cfg.set(id,el.value);
     if(id==="uiMode") cfg.set("pad","");   // 実行画面での一時トグルを解除
-  });
+    // 鍵が揃ったら案内を消す
+    if((id==="clientId"||id==="apiKey")&&cfg.get("clientId","")&&cfg.get("apiKey","")
+       &&$("#pickNote").dataset.drive){ $("#pickNote").textContent=""; delete $("#pickNote").dataset.drive; }
+  };
+  // iOS は入力欄の change が blur 時にしか出ず、貼り付け直後にボタンを押すと
+  // 保存前になることがあるため input でも保存する
+  el.addEventListener("input",save); el.addEventListener("change",save);
 });
 
 /* =========================================================
@@ -433,7 +453,16 @@ function loadScript(src){ return new Promise((res,rej)=>{
 let token=null;
 $("#driveBtn").addEventListener("click", async ()=>{
   const cid=cfg.get("clientId",""), key=cfg.get("apiKey","");
-  if(!cid||!key){ toast("設定でクライアントIDとAPIキーを入れてください"); $("details").open=true; return; }
+  if(!cid||!key){
+    // 未設定のときは設定を開く。一瞬で消えるトーストだけだと故障に見えるので、
+    // 消えない案内文を出してから設定までスクロールする
+    const note=$("#pickNote");
+    note.textContent="Googleドライブを使うには、下の「設定」でクライアントIDとAPIキーを入力してください（未入力のため設定を開きました）。";
+    note.dataset.drive="1";
+    const d=$("details"); d.open=true;
+    setTimeout(()=>d.scrollIntoView({behavior:"smooth",block:"start"}),60);
+    return;
+  }
   try{
     $("#driveBtn").disabled=true; toast("ドライブに接続中…");
     if(!window.google?.accounts?.oauth2) await loadScript("https://accounts.google.com/gsi/client");
@@ -614,6 +643,54 @@ function padMove(e){
   padActive.set(e.pointerId,new Set(padHit(e.clientX,e.clientY))); padApply();
 }
 function padUp(e){ if(padActive.delete(e.pointerId)) padApply(); }
+
+/* iOS Safari は viewport の user-scalable=no を無視するため、
+   パッド上のタップから起きるダブルタップ拡大・ピンチ・長押しメニューを明示的に止める。
+   pointerdown/pointerup は touchstart/touchend より先に発火するので、
+   ここで既定動作を止めてもパッドの入力自体には影響しない。 */
+const VIEWPORT="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover, user-scalable=no";
+let padTouchAt=0;
+
+/* パッド領域（=画面とバーを除いた実行画面）か */
+function inPadArea(t){
+  if(!(t&&t.closest)) return false;
+  if(!t.closest("#stage")) return false;
+  return !(t.closest("#bar")||t.closest("#screenWrap"));
+}
+function padGuard(e){
+  if(!document.body.classList.contains("pad-on")) return;
+  if(!inPadArea(e.target)) return;
+  padTouchAt=Date.now();
+  if(e.cancelable) e.preventDefault();
+  // 万一 pointerup を取りこぼしても、指が全部離れたら必ず解放する
+  if(e.type==="touchend"&&e.touches&&e.touches.length===0) padRelease();
+}
+/* ピンチ拡大は実行画面全体で止める（拡大するとレイアウトが崩れるだけのため） */
+function padGesture(e){
+  if(!document.body.classList.contains("pad-on")) return;
+  if(!(e.target&&e.target.closest&&e.target.closest("#stage"))) return;
+  if(e.cancelable) e.preventDefault();
+}
+/* 他のスクリプトに stopPropagation されても効くよう、window の捕捉フェーズで拾う */
+["touchstart","touchmove","touchend","touchcancel","dblclick","contextmenu"]
+  .forEach(t=>addEventListener(t,padGuard,{passive:false,capture:true}));
+["gesturestart","gesturechange","gestureend"]
+  .forEach(t=>addEventListener(t,padGesture,{passive:false,capture:true}));
+
+/* 最後の砦：それでも拡大されたら、viewport を入れ直して等倍に戻す。
+   iOS は user-scalable=no を無視するが、meta の書き換えには追従する。
+   パッド操作の直後に限るので、ゲーム画面での意図的な操作は妨げない */
+function padZoomReset(){
+  const m=document.querySelector('meta[name=viewport]'); if(!m) return;
+  m.setAttribute("content",VIEWPORT+", user-scalable=0");
+  requestAnimationFrame(()=>m.setAttribute("content",VIEWPORT));
+}
+if(window.visualViewport){
+  visualViewport.addEventListener("resize",()=>{
+    if(!document.body.classList.contains("pad-on")) return;
+    if(visualViewport.scale>1.01 && Date.now()-padTouchAt<1500){ padZoomReset(); padMeasure(); }
+  });
+}
 
 $("#stage").addEventListener("pointerdown",padDown,{passive:false});
 addEventListener("pointermove",padMove,{passive:false});
