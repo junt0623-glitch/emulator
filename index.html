@@ -87,9 +87,15 @@ button.key{border-color:#5c5231;background:linear-gradient(#3a3421,#2b2718);colo
 .slot .acts button{padding:6px 9px;min-height:32px;font-size:12px}
 
 /* ---- screen ---- */
+#screenWrap{position:relative}
 #screen{background:#0c0e12;border:1px solid var(--edge);border-radius:6px;overflow:hidden;
   width:100%;aspect-ratio:4/3;max-height:70dvh}
 #screen:fullscreen{border:0;border-radius:0;max-height:none;aspect-ratio:auto;height:100%}
+#tapStart{position:absolute;inset:0;width:100%;height:100%;z-index:50;border:0;border-radius:6px;
+  background:rgba(12,14,18,.6);color:var(--ivory);font-family:var(--body);font-size:17px;
+  letter-spacing:.08em;display:flex;align-items:center;justify-content:center;gap:10px;
+  cursor:pointer;-webkit-tap-highlight-color:transparent}
+#tapStart::before{content:"▶";color:var(--brass);font-size:15px}
 .hidden{display:none!important}
 
 /* ---- panels ---- */
@@ -161,7 +167,10 @@ p.help{font-size:12.5px;color:var(--dim);line-height:1.7;margin:8px 0 0}
 
 <!-- ============ 実行画面 ============ -->
 <section id="runner" class="hidden">
-  <div id="screen"></div>
+  <div id="screenWrap">
+    <div id="screen"></div>
+    <button id="tapStart" type="button">タップして開始</button>
+  </div>
 
   <div class="legend">速度</div>
   <div class="switch" id="speed">
@@ -347,7 +356,7 @@ async function boot(){
   window.EJS_cacheConfig={enabled:true,cacheMaxSizeMB:4096,cacheMaxAgeMins:525600};
   const um=cfg.get("uiMode",""); if(um) window.EJS_browserMode=um;
   if(cfg.get("debug","")==="1") window.EJS_DEBUG_XX=true;
-  window.EJS_onGameStart=()=>{ cfg.set("ready:"+rec.sys,"1"); applySpeed(currentSpeed,true); };
+  window.EJS_onGameStart=()=>{ cfg.set("ready:"+rec.sys,"1"); applySpeed(currentSpeed,true); $("#tapStart").classList.add("hidden"); };
 
   try{ await loadScript(EJS_CDN+"loader.js"); }
   catch(e){ toast(navigator.onLine?"エミュレータ本体を読み込めません":"この機種はまだ端末に保存されていません（オンラインで一度起動が必要）"); }
@@ -417,6 +426,13 @@ $("#slots").addEventListener("click", async e=>{
 });
 
 /* ---------- 全画面 / 戻る ---------- */
+/* ---------- タップして開始（EmulatorJS内部ボタンが反応しない端末向けの保険） ---------- */
+$("#tapStart").addEventListener("click", ()=>{
+  const inner = document.querySelector(".ejs_start_button");
+  if(inner){ inner.click(); }
+  $("#tapStart").classList.add("hidden");
+});
+
 $("#fsBtn").addEventListener("click",()=>{
   const el=$("#screen");
   if(document.fullscreenElement||document.webkitFullscreenElement){ (document.exitFullscreen||document.webkitExitFullscreen).call(document); }
