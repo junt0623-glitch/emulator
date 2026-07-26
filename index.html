@@ -44,7 +44,6 @@ h1{font-family:var(--disp);font-stretch:condensed;font-size:19px;font-weight:600
 .plate{background:var(--plate);color:#1b1e24;border-radius:3px;padding:10px 11px 11px;
   border-left:7px solid var(--edge);box-shadow:0 1px 0 #0006}
 .plate.nes{border-left-color:var(--nes)} .plate.sfc{border-left-color:var(--sfc)}
-.plate.gba{border-left-color:var(--gba)} .plate.nds{border-left-color:var(--nds)}
 .plate b{display:block;font-family:var(--disp);font-stretch:condensed;font-size:14px;letter-spacing:.08em}
 .plate span{font-family:var(--mono);font-size:11px;color:#5c6371;display:block;margin-top:3px}
 .plate em{font-family:var(--mono);font-size:10px;font-style:normal;color:#8a919e;display:block;margin-top:6px}
@@ -113,7 +112,7 @@ p.help{font-size:12.5px;color:var(--dim);line-height:1.7;margin:8px 0 0}
 
 <header>
   <h1>カートリッジ棚</h1>
-  <span class="sub">NES / SFC / GBA / NDS</span>
+  <span class="sub">NES / SFC</span>
   <span class="net" id="net"><i></i><span id="netTxt">確認中</span></span>
 </header>
 
@@ -122,13 +121,11 @@ p.help{font-size:12.5px;color:var(--dim);line-height:1.7;margin:8px 0 0}
   <div class="shelf">
     <div class="plate nes"><b>ファミコン</b><span>.nes .fds</span><em data-ready="nes">未起動</em></div>
     <div class="plate sfc"><b>スーパーファミコン</b><span>.smc .sfc</span><em data-ready="snes">未起動</em></div>
-    <div class="plate gba"><b>ゲームボーイアドバンス</b><span>.gba</span><em data-ready="gba">未起動</em></div>
-    <div class="plate nds"><b>ニンテンドーDS</b><span>.nds</span><em data-ready="nds">未起動</em></div>
   </div>
 
   <div class="row">
     <label class="filebtn key">この端末から選ぶ
-      <input type="file" id="localFile" accept=".nes,.fds,.smc,.sfc,.gba,.nds,.zip,.7z">
+      <input type="file" id="localFile" accept=".nes,.fds,.smc,.sfc,.zip,.7z">
     </label>
     <button id="driveBtn">Googleドライブから選ぶ</button>
   </div>
@@ -140,15 +137,6 @@ p.help{font-size:12.5px;color:var(--dim);line-height:1.7;margin:8px 0 0}
   <details>
     <summary>設定</summary>
     <div class="body">
-      <label class="f">DS のコア</label>
-      <select id="ndsCore">
-        <option value="desmume2015">desmume2015（BIOS不要・軽い）</option>
-        <option value="melonds">melonDS（BIOS必須・精度高）</option>
-      </select>
-      <label class="f">DS の BIOS（melonDS 使用時のみ／bios7.bin・bios9.bin・firmware.bin をまとめた zip）</label>
-      <label class="filebtn">BIOS zip を登録<input type="file" id="biosFile" accept=".zip,.bin"></label>
-      <span class="sub" id="biosState" style="margin-left:8px"></span>
-
       <label class="f">詳細ログ（不具合調査用・ブラウザのコンソールに出力）</label>
       <select id="debug">
         <option value="">オフ</option>
@@ -235,9 +223,9 @@ function paintNet(){ const on=navigator.onLine;
 addEventListener("online",paintNet); addEventListener("offline",paintNet); paintNet();
 
 /* ---------- 拡張子 → 機種 ---------- */
-const SYS = { nes:"nes", fds:"nes", smc:"snes", sfc:"snes", gba:"gba", nds:"nds" };
+const SYS = { nes:"nes", fds:"nes", smc:"snes", sfc:"snes" };
 function sysOf(name){ const e=(name.split(".").pop()||"").toLowerCase(); return SYS[e]||null; }
-function coreOf(sys){ return sys==="nds" ? cfg.get("ndsCore","desmume2015") : sys; }
+function coreOf(sys){ return sys; }
 function hash(name,buf){ // 保存枠のキー用の軽量ハッシュ
   const v=new Uint8Array(buf); let h=0x811c9dc5;
   const step=Math.max(1,Math.floor(v.length/4096));
@@ -258,7 +246,7 @@ async function stage(name, buf, sysHint){
   console.log("[cart-shelf] stage() 開始:", name, buf.byteLength+" bytes");
   const sys = sysHint || sysOf(name);
   console.log("[cart-shelf] 判定された機種:", sys);
-  if(!sys){ toast("機種が判別できません（.nes .smc .sfc .gba .nds）"); return; }
+  if(!sys){ toast("機種が判別できません（.nes .fds .smc .sfc）"); return; }
   try{
     await dbPut("kv","rom",{name, buf, sys, at:Date.now()});
     console.log("[cart-shelf] IndexedDB への保存に成功。ページを再読み込みします");
@@ -290,17 +278,8 @@ $("#localFile").addEventListener("change", async e=>{
   }
 });
 
-/* ---------- BIOS 登録 ---------- */
-$("#biosFile").addEventListener("change", async e=>{
-  const f=e.target.files[0]; if(!f) return;
-  await dbPut("kv","bios",{name:f.name, buf:await f.arrayBuffer()});
-  paintBios(); toast("BIOS を登録しました");
-});
-async function paintBios(){ const b=await dbGet("kv","bios");
-  $("#biosState").textContent = b ? "登録済み: "+b.name : "未登録"; }
-
 /* ---------- 設定UIの束ね ---------- */
-[["ndsCore","desmume2015"],["uiMode",""],["debug",""],["clientId",""],["apiKey",""]].forEach(([id,d])=>{
+[["uiMode",""],["debug",""],["clientId",""],["apiKey",""]].forEach(([id,d])=>{
   const el=$("#"+id); el.value=cfg.get(id,d);
   el.addEventListener("change",()=>cfg.set(id,el.value));
 });
@@ -349,14 +328,12 @@ $("#driveBtn").addEventListener("click", async ()=>{
 let ROMKEY="", ROMNAME="";
 async function boot(){
   const rec=await dbGet("kv","rom");
-  await paintBios();
   if(!rec) return;
 
   ROMNAME=rec.name; ROMKEY=hash(rec.name,rec.buf);
   $("#picker").classList.add("hidden"); $("#runner").classList.remove("hidden");
   renderSlots();
 
-  const bios=await dbGet("kv","bios");
   window.EJS_player="#screen";
   window.EJS_pathtodata=EJS_CDN;
   window.EJS_core=coreOf(rec.sys);
@@ -370,8 +347,6 @@ async function boot(){
   window.EJS_cacheConfig={enabled:true,cacheMaxSizeMB:4096,cacheMaxAgeMins:525600};
   const um=cfg.get("uiMode",""); if(um) window.EJS_browserMode=um;
   if(cfg.get("debug","")==="1") window.EJS_DEBUG_XX=true;
-  if(bios && window.EJS_core==="melonds") window.EJS_biosUrl=new File([bios.buf], bios.name, {type:"application/octet-stream"});
-  if(!bios && window.EJS_core==="melonds") toast("melonDS には BIOS が必要です。設定で登録するか desmume2015 に切り替えてください");
   window.EJS_onGameStart=()=>{ cfg.set("ready:"+rec.sys,"1"); applySpeed(currentSpeed,true); };
 
   try{ await loadScript(EJS_CDN+"loader.js"); }
@@ -393,7 +368,7 @@ function applySpeed(n,quiet){
     EJS_emulator.changeSettingOption("ff", n===1?"disabled":"enabled"); ok=true;
   }catch(e){} }
   $("#speedNote").textContent = ok
-    ? (n>2 ? "※ "+n+"× は目標値です。DS/GBA は端末の処理能力が上限になります。" : "")
+    ? (n>4 ? "※ "+n+"× は目標値です。端末の処理能力が上限になります。" : "")
     : "この版では速度APIが呼べません。歯車メニュー内の Fast Forward Ratio を使ってください。";
   if(!quiet && ok) toast(n+"× で実行中");
 }
