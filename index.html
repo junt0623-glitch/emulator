@@ -386,10 +386,23 @@ function hash(name,buf){ // 保存枠のキー用の軽量ハッシュ
   return h.toString(16).padStart(8,"0"); }
 
 /* ---------- 起動済み機種のラベル ---------- */
-function paintReady(){ document.querySelectorAll("[data-ready]").forEach(el=>{
-  const ok=cfg.get("ready:"+el.dataset.ready)==="1";
-  el.textContent = ok?"保存済み — オフライン可":"未起動";
-  el.classList.toggle("ready",ok); }); }
+/* 「保存済み」は localStorage のフラグだけで決めず、EmulatorJS 本体が実際に
+   キャッシュに残っているかも見る。キャッシュが消えているのにラベルだけ
+   「オフライン可」のままだと、オフラインで起動できない原因が分からなくなる */
+async function frameCached(){
+  try{ return !!(window.caches && await caches.match(EJS_CDN+"loader.js")); }
+  catch(e){ return false; }
+}
+async function paintReady(){
+  const framed = await frameCached();
+  document.querySelectorAll("[data-ready]").forEach(el=>{
+    const started = cfg.get("ready:"+el.dataset.ready)==="1";
+    const ok = started && framed;
+    el.textContent = ok ? "保存済み — オフライン可"
+                  : started ? "本体の再取得が必要（オンラインで一度起動）"
+                  : "未起動";
+    el.classList.toggle("ready",ok); });
+}
 paintReady();
 
 /* ---------- ROM を積んで再読込 ---------- */
@@ -528,7 +541,9 @@ async function boot(){
   };
 
   try{ await loadScript(EJS_CDN+"loader.js"); }
-  catch(e){ toast(navigator.onLine?"エミュレータ本体を読み込めません":"この機種はまだ端末に保存されていません（オンラインで一度起動が必要）"); }
+  catch(e){ toast(navigator.onLine
+    ? "エミュレータ本体を読み込めません"
+    : "オフラインでは起動できません。一度オンラインで起動すると、次回から機内モードでも動きます。"); }
 }
 
 /* ---------- 速度 ---------- */
@@ -788,8 +803,12 @@ $("#backBtn").addEventListener("click", async ()=>{
 });
 
 /* ---------- Service Worker（オフライン用） ---------- */
-if("serviceWorker" in navigator && location.protocol==="https:"){
-  addEventListener("load",()=>navigator.serviceWorker.register("./sw.js").catch(()=>{}));
+/* localhost も secure context なので、手元での検証用に許可しておく */
+if("serviceWorker" in navigator &&
+   (location.protocol==="https:" || ["localhost","127.0.0.1"].includes(location.hostname))){
+  addEventListener("load",()=>navigator.serviceWorker.register("./sw.js")
+    .then(()=>paintReady())        // 本体がキャッシュされたらラベルを更新
+    .catch(()=>{}));
 }
 
 boot();

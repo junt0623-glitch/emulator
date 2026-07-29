@@ -23,7 +23,9 @@ GBA/NDSは一度実装したが、施設のセキュリティソフト（ウイ�
 ## 既知の落とし穴（再発防止）
 1. **iOS Safariで `<input type="file" accept="...">` に独自拡張子（.nes等）を指定すると、ファイルがグレーアウトして選択不可になることがある**。`accept` 属性は付けず、選択後にJS側（`sysOf()`）で拡張子を検証する方式にしてある。この属性を安易に復活させないこと
 2. **EmulatorJSが内部生成する `.ejs_start_button` に、opacity:0の内部オーバーレイ（`.ejs_context_menu` 等）が重なり、実機タップが届かないことがある**（コンソールから `.click()` すると通ってしまうが、これは「本物のユーザー操作」と見なされずAudioContext等の権限エラーになるので偽陽性の確認方法にはならない）。対策として `#tapStart` という自前の全面オーバーレイボタンを `#screenWrap` 内に設置し、実タップを確実に拾って内部ボタンへ `.click()` で中継している。これを消さないこと
-3. **Service Workerはキャッシュを持つため、index.html / sw.js のどちらかを更新したら、`sw.js` 冒頭の `SHELL` / `FRAME` の版数（`shell-v6` など）を必ず1つ上げること**。上げ忘れると古いキャッシュが配信され続け、ユーザー側は「アップロードしたのに反映されない」状態になる
+3. **Service Workerはキャッシュを持つため、index.html / sw.js のどちらかを更新したら、`sw.js` 冒頭の `SHELL` の版数（`shell-v10` など）を必ず1つ上げること**。上げ忘れると古いキャッシュが配信され続け、ユーザー側は「アップロードしたのに反映されない」状態になる
+   - **`FRAME`（EmulatorJS本体のキャッシュ）の名前は絶対に変えないこと。** `activate` は現行の `SHELL`/`FRAME` 以外のキャッシュを全削除するので、`FRAME` を上げると EmulatorJS 本体（`emulator.min.js` 等）のキャッシュが消え、**「オンラインで一度起動したのにオフラインで起動しない」**状態になる。実際にこれで壊した（v6→v9 で3回消えた）。CDNのURLは `/stable/` 配下で固定なので版数は不要
+   - 旧 `ejs-frame-vN` から固定名へ中身を引き継ぐ `adoptOldFrames()` が入っているが、これは移行用なので新たに版数を付ける口実にしないこと
 4. **自前パッドの入力は `EJS_emulator.gameManager.simulateInput(0, ボタン番号, 0/1)` で送っている**。番号はlibretroのRetroPad順（`0:B 1:Y 2:SELECT 3:START 4:上 5:下 6:左 7:右 8:A 9:X 10:L 11:R`）で、EmulatorJS側の内部APIなので更新で壊れうる。壊れたときのために `keyCode` 付きの KeyboardEvent を送る保険（`KEYCODE`）を残してある
 5. **パッドの当たり判定は要素の `getBoundingClientRect()` をキャッシュして座標で行う**（十字キーの斜め入力・同時押し・指を滑らせての持ち替えのため）。回転／全画面切替／指を全部離したタイミングで採寸し直しているので、レイアウトを変えたら `padMeasure()` が呼ばれる経路も確認すること
 6. デバッグ時、ブラウザの通常キャッシュクリアだけではService Workerのキャッシュは消えない。DevTools の Application → Service Workers → Unregister、または Storage → Clear site data が必要
