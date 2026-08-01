@@ -206,6 +206,9 @@ label.f{display:block;font-family:var(--mono);font-size:11px;color:var(--dim);ma
 input[type=text],select{width:100%;background:#15181f;color:var(--ivory);border:1px solid var(--edge);
   border-radius:4px;padding:10px;font-family:var(--mono);font-size:13px;min-height:44px}
 p.help{font-size:12.5px;color:var(--dim);line-height:1.7;margin:8px 0 0}
+#diag{background:#15181f;border:1px solid var(--edge);border-radius:4px;padding:10px;margin:0;
+  font-family:var(--mono);font-size:11px;line-height:1.6;color:var(--dim);
+  white-space:pre-wrap;word-break:break-all;-webkit-user-select:text;user-select:text}
 #toast{position:fixed;left:50%;bottom:calc(18px + env(safe-area-inset-bottom));transform:translateX(-50%);
   background:#0d1015;border:1px solid var(--edge);color:var(--ivory);font-family:var(--mono);font-size:12px;
   padding:10px 16px;border-radius:20px;opacity:0;pointer-events:none;transition:opacity .2s;z-index:99;max-width:88vw;text-align:center}
@@ -258,6 +261,10 @@ p.help{font-size:12.5px;color:var(--dim);line-height:1.7;margin:8px 0 0}
         <option value="mobile">常に表示（iPad推奨）</option>
         <option value="desktop">表示しない（キーボードで操作）</option>
       </select>
+
+      <label class="f">オフライン保存の状態（うまく動かないときの確認用）</label>
+      <pre id="diag">確認中…</pre>
+      <button id="diagBtn" style="margin-top:8px">再チェック</button>
 
       <label class="f">Google OAuth クライアントID（ドライブ読み込みに必要）</label>
       <input type="text" id="clientId" placeholder="xxxxxxxx.apps.googleusercontent.com" autocapitalize="off" spellcheck="false">
@@ -385,25 +392,71 @@ function hash(name,buf){ // 保存枠のキー用の軽量ハッシュ
   for(let i=0;i<name.length;i++){ h^=name.charCodeAt(i); h=(h*0x01000193)>>>0; }
   return h.toString(16).padStart(8,"0"); }
 
-/* ---------- 起動済み機種のラベル ---------- */
-/* 「保存済み」は localStorage のフラグだけで決めず、EmulatorJS 本体が実際に
-   キャッシュに残っているかも見る。キャッシュが消えているのにラベルだけ
-   「オフライン可」のままだと、オフラインで起動できない原因が分からなくなる */
-async function frameCached(){
-  try{ return !!(window.caches && await caches.match(EJS_CDN+"loader.js")); }
-  catch(e){ return false; }
+/* ---------- オフライン保存の状態 ---------- */
+const FRAME_CACHE="ejs-frame";
+/* Vary や版数つきURLで取りこぼすと「あるのに無い」と誤判定するので緩めに照合する */
+async function cacheHit(url){
+  if(!url||!window.caches) return false;
+  try{
+    const c=await caches.open(FRAME_CACHE);
+    return !!(await c.match(url,{ignoreVary:true})
+           || await c.match(url,{ignoreVary:true,ignoreSearch:true}));
+  }catch(e){ return false; }
 }
+async function cachedCores(){
+  try{
+    const c=await caches.open(FRAME_CACHE);
+    return (await c.keys()).map(r=>r.url).filter(u=>u.includes("/cores/"));
+  }catch(e){ return []; }
+}
+
+/* 「保存済み」は localStorage のフラグだけで決めない。
+   本体（loader.js）と、その機種で実際に使われたコアの両方が
+   キャッシュに残っているときだけオフライン可と表示する */
 async function paintReady(){
-  const framed = await frameCached();
-  document.querySelectorAll("[data-ready]").forEach(el=>{
-    const started = cfg.get("ready:"+el.dataset.ready)==="1";
-    const ok = started && framed;
+  const haveLoader=await cacheHit(EJS_CDN+"loader.js");
+  for(const el of document.querySelectorAll("[data-ready]")){
+    const sys=el.dataset.ready;
+    const started=cfg.get("ready:"+sys)==="1";
+    const coreUrl=cfg.get("core:"+sys,"");
+    const haveCore=await cacheHit(coreUrl);
+    const ok=started&&haveLoader&&haveCore;
     el.textContent = ok ? "保存済み — オフライン可"
-                  : started ? "本体の再取得が必要（オンラインで一度起動）"
+                  : started ? "オンラインで一度起動し直してください"
                   : "未起動";
-    el.classList.toggle("ready",ok); });
+    el.classList.toggle("ready",ok);
+  }
 }
 paintReady();
+
+/* ---------- 診断（オフラインで動かないときの切り分け用） ---------- */
+async function diagText(){
+  if(!window.caches) return "このブラウザではキャッシュを確認できません";
+  const L=[];
+  try{
+    L.push("SW: "+(navigator.serviceWorker&&navigator.serviceWorker.controller?"動作中":"未登録または未制御"));
+    L.push("キャッシュ: "+((await caches.keys()).join(", ")||"なし"));
+    const c=await caches.open(FRAME_CACHE);
+    const keys=await c.keys();
+    const cores=(await cachedCores()).map(u=>u.split("/").pop());
+    L.push("CDN保存数: "+keys.length+" ファイル");
+    L.push("コア: "+(cores.length?cores.join(", "):"なし ← これが空だとオフラインで起動できません"));
+    L.push("loader.js: "+(await cacheHit(EJS_CDN+"loader.js")?"あり":"なし"));
+    for(const s of ["nes","snes"]){
+      const u=cfg.get("core:"+s,"");
+      L.push(s+": 起動"+(cfg.get("ready:"+s)==="1"?"済":"なし")
+        +" / コア"+(u?(await cacheHit(u)?"あり":"消えている"):"未記録"));
+    }
+    if(navigator.storage&&navigator.storage.estimate){
+      const e=await navigator.storage.estimate();
+      L.push("使用量: "+((e.usage||0)/1048576).toFixed(1)+" MB");
+    }
+  }catch(err){ L.push("エラー: "+(err&&err.message?err.message:err)); }
+  return L.join("\n");
+}
+async function paintDiag(){ $("#diag").textContent=await diagText(); }
+$("#diagBtn").addEventListener("click",()=>{ paintReady(); paintDiag(); });
+paintDiag();
 
 /* ---------- ROM を積んで再読込 ---------- */
 async function stage(name, buf, sysHint){
@@ -538,8 +591,18 @@ async function boot(){
     cfg.set("ready:"+rec.sys,"1"); applySpeed(currentSpeed,true);
     $("#tapStart").classList.add("hidden");
     setPad(document.body.classList.contains("pad-on"));   // 内蔵パッド設定を再適用＋採寸
+    // この機種がどのコアを使ったかを控える（オフライン可否を正確に判定するため）。
+    // Service Worker の保存は非同期なので少し待ってから見る
+    setTimeout(async ()=>{
+      const now=await cachedCores();
+      const added=now.filter(u=>!coresBefore.includes(u));
+      const pick=added[added.length-1] || (now.length===1?now[0]:"");
+      if(pick) cfg.set("core:"+rec.sys,pick);
+      paintDiag();
+    },3000);
   };
 
+  const coresBefore=await cachedCores();   // 起動前のコア一覧（差分で機種を特定する）
   try{ await loadScript(EJS_CDN+"loader.js"); }
   catch(e){ toast(navigator.onLine
     ? "エミュレータ本体を読み込めません"
@@ -806,9 +869,12 @@ $("#backBtn").addEventListener("click", async ()=>{
 /* localhost も secure context なので、手元での検証用に許可しておく */
 if("serviceWorker" in navigator &&
    (location.protocol==="https:" || ["localhost","127.0.0.1"].includes(location.hostname))){
-  addEventListener("load",()=>navigator.serviceWorker.register("./sw.js")
-    .then(()=>paintReady())        // 本体がキャッシュされたらラベルを更新
-    .catch(()=>{}));
+  addEventListener("load",()=>navigator.serviceWorker.register("./sw.js").catch(()=>{}));
+  // register() は有効化の完了より先に解決するので、実際に制御下に入ってから
+  // ラベルと診断を計算し直す（移行途中の状態で「再取得が必要」と誤表示しないため）
+  const refresh=()=>{ paintReady(); paintDiag(); };
+  navigator.serviceWorker.ready.then(refresh).catch(()=>{});
+  navigator.serviceWorker.addEventListener("controllerchange",refresh);
 }
 
 boot();
