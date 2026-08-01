@@ -12,6 +12,7 @@ GitHub Pages で公開し、iPad/Mac のブラウザから使う。**ローカ�
 - **単一HTML・外部依存ゼロ・ローカルインストール不要・オフライン対応**が全プロジェクト共通の絶対ルール（sw.jsのみ例外）
 - エミュレーション本体は自作せず [EmulatorJS](https://emulatorjs.org)（RetroArch WASM）をCDN経由で使用。`EJS_CDN = "https://cdn.emulatorjs.org/stable/data/"`
 - ROMは IndexedDB（`cart-shelf` DB, `kv`/`states` ストア）に保存
+- **CDNから来たものは Service Worker で全部キャッシュする（コア本体 `/cores/` も含む）**。かつては「コアは EmulatorJS 自身が IndexedDB に保存するので二重に持たない」としていたが、それだとオフライン可否が EmulatorJS 内部のキャッシュ実装に依存し、**実際にオフラインで起動しなかった**（ブラウザのHTTPキャッシュが効いている間だけ動くので、検証時に見逃しやすい）。容量よりオフラインの確実性を優先する
 - **ROM切替は必ず `location.reload()` を伴うページ再読込方式**。コアの取り違えを防ぐため、SPA的な差し替えはしない
 - **タッチ操作は EmulatorJS 内蔵の仮想パッドを使わず、自前パッド（`.pad-side` / `#dpad` / `.face`）を使う**。内蔵パッドはゲーム画面に重なって絵が隠れるため。自前パッドは画面の外側（縦持ち＝下、横持ち＝左右）に置き、`body.pad-on` のときは内蔵パッドをCSSで非表示にしている
 - ROMファイルは `Blob` ではなく **`File` オブジェクト**でEmulatorJSに渡すこと（`new File([buf], name, {...})`）。Blob URLは拡張子情報を失い、拡張子で機種判定するコア（過去にGBA/NDSで発生）が動かなくなる

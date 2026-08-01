@@ -1,10 +1,15 @@
 /* カートリッジ棚 — オフライン用 Service Worker
    ・アプリ本体（index.html）を保存
-   ・EmulatorJS の本体スクリプト/CSS/翻訳を保存
-   ・コア本体（/cores/）は EmulatorJS 自身が IndexedDB に保存するので二重に持たない */
+   ・CDN(EmulatorJS)から来たものは【コア本体も含めて全部】保存する
+
+   以前は「コアは EmulatorJS 自身が IndexedDB に保存するので二重に持たない」
+   としていたが、それだと オフラインで動くかどうかが EmulatorJS 内部の
+   キャッシュ実装（版数チェックのために通信するか等）に依存してしまい、
+   実際にオフラインで起動しなかった。こちらで全部持てば依存しなくなる。
+   容量は増えるが、確実にオフラインで動くことを優先する。 */
 
 /* アプリ本体のキャッシュ。index.html / sw.js を更新したらここだけ上げる */
-const SHELL = "shell-v10";
+const SHELL = "shell-v11";
 
 /* EmulatorJS 本体のキャッシュ。
    ここに版数を付けて上げると activate のときに中身が消え、
@@ -51,10 +56,10 @@ self.addEventListener("activate", e => {
   );
 });
 
+/* 拡張子で絞ると「その1ファイルだけ未キャッシュでオフライン起動できない」が起きる。
+   CDN から来たものは種類を問わず全部保存する */
 function isFramework(url) {
-  if (!url.startsWith(CDN)) return false;
-  if (url.includes("/cores/")) return false;          // 巨大なコアは対象外
-  return /\.(js|css|json|svg|png|wasm|woff2?)(\?|$)/.test(url);
+  return url.startsWith(CDN);
 }
 
 self.addEventListener("fetch", e => {
@@ -83,15 +88,18 @@ self.addEventListener("fetch", e => {
     return;
   }
 
-  // EmulatorJS 本体：キャッシュ優先
+  // EmulatorJS（コア本体を含む）：キャッシュ優先
   // CDN は別オリジンで opaque なレスポンス（status 0）になるため res.ok は見ない
   if (isFramework(url)) {
     e.respondWith((async () => {
       const cache = await caches.open(FRAME);
-      const hit = await cache.match(req);
+      // 完全一致 →（版数つきURL等のために）検索文字列とVaryを無視して再照合
+      let hit = await cache.match(req);
+      if (!hit) hit = await cache.match(req, { ignoreSearch: true, ignoreVary: true });
       if (hit) return hit;
       const res = await fetch(req);
-      cache.put(req, res.clone()).catch(() => {});
+      // 部分応答(206)は保存できないので弾く。容量超過などは握りつぶす
+      if (res && res.status !== 206) cache.put(req, res.clone()).catch(() => {});
       return res;
     })());
   }
