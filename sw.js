@@ -9,7 +9,7 @@
    容量は増えるが、確実にオフラインで動くことを優先する。 */
 
 /* アプリ本体のキャッシュ。index.html / sw.js を更新したらここだけ上げる */
-const SHELL = "shell-v11";
+const SHELL = "shell-v12";
 
 /* EmulatorJS 本体のキャッシュ。
    ここに版数を付けて上げると activate のときに中身が消え、

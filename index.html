@@ -352,6 +352,76 @@ let toastT;
 function toast(m){ toastEl.textContent=m; toastEl.classList.add("show");
   clearTimeout(toastT); toastT=setTimeout(()=>toastEl.classList.remove("show"),2600); }
 
+/* =========================================================
+   音を止めないための AudioContext 監視
+
+   iOS は アプリを裏に回す・画面を消す・電話などの割り込みが入ると
+   AudioContext を suspended / interrupted にし、戻ってきても自動では
+   再開しない（＝中断して再開すると音だけ出なくなる）。
+   復帰には resume() が必要で、しかもユーザー操作の中から呼ぶ必要がある。
+
+   EmulatorJS のどこに AudioContext があるかは内部実装なので、
+   コンストラクタを先回りして包み、作られたものを全部押さえる。
+   この処理は loader.js を読み込むより前に実行されている必要がある。
+   ========================================================= */
+const audioCtxs = [];
+(function watchAudio(){
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if(!AC) return;
+  let Wrapped;
+  try{
+    Wrapped = class extends AC {
+      constructor(...a){
+        super(...a); audioCtxs.push(this);
+        // 割り込みで状態が変わった瞬間にも戻しにいく（操作なしで戻せる場合がある）
+        this.addEventListener("statechange",()=>{
+          if(this.state!=="running" && !document.hidden) this.resume().catch(()=>{});
+        });
+      }
+    };
+  }catch(e){ return; }               // 包めない環境ではそのまま使わせる
+  if(window.AudioContext) window.AudioContext = Wrapped;
+  if(window.webkitAudioContext) window.webkitAudioContext = Wrapped;
+})();
+
+/* EmulatorJS(Emscripten/SDL) が別経路で作った場合の拾い漏れ対策 */
+function collectAudio(){
+  const e = window.EJS_emulator;
+  const cands = [e && e.Module, e && e.gameManager && e.gameManager.Module];
+  for(const m of cands){
+    const c = m && m.SDL2 && m.SDL2.audioContext;
+    if(c && !audioCtxs.includes(c)) audioCtxs.push(c);
+  }
+}
+function audioStuck(){
+  collectAudio();
+  return audioCtxs.some(c=>c.state!=="running");
+}
+async function resumeAudio(){
+  collectAudio();
+  for(const c of audioCtxs){
+    if(c.state==="running") continue;
+    try{ await c.resume(); }catch(err){}
+  }
+}
+/* 復帰しうる場面すべてで試す。iOS は操作の中でしか resume できないので、
+   パッドや画面へのタップでも必ず試す（自前パッドの preventDefault は
+   ユーザー操作の扱いに影響しない） */
+["visibilitychange","pageshow","focus","resume"].forEach(t=>
+  addEventListener(t,()=>{ if(!document.hidden) resumeAudio(); }));
+let audioWarned=false;
+["pointerdown","touchend","click","keydown"].forEach(t=>
+  addEventListener(t,()=>{
+    if(!audioCtxs.length || !audioStuck()) return;
+    resumeAudio();
+    // 操作のなかで resume しても戻らない場合だけ、一度だけ知らせる
+    setTimeout(()=>{
+      if(audioWarned || !audioStuck() || document.hidden) return;
+      audioWarned=true;
+      toast("音が止まったままです。メニューでセーブ→再読み込み→読込で戻ります");
+    },400);
+  },{passive:true,capture:true}));
+
 /* ---------- IndexedDB ---------- */
 function db(){return new Promise((res,rej)=>{const r=indexedDB.open("cart-shelf",1);
   r.onupgradeneeded=()=>{const d=r.result;
@@ -451,6 +521,10 @@ async function diagText(){
       const e=await navigator.storage.estimate();
       L.push("使用量: "+((e.usage||0)/1048576).toFixed(1)+" MB");
     }
+    collectAudio();
+    L.push("音声: "+(audioCtxs.length
+      ? audioCtxs.map(c=>c.state).join(", ")+"（running 以外なら音が出ません）"
+      : "未作成（ゲーム起動前）"));
   }catch(err){ L.push("エラー: "+(err&&err.message?err.message:err)); }
   return L.join("\n");
 }
