@@ -29,7 +29,8 @@ GBA/NDSは一度実装したが、施設のセキュリティソフト（ウイ�
    - 旧 `ejs-frame-vN` から固定名へ中身を引き継ぐ `adoptOldFrames()` が入っているが、これは移行用なので新たに版数を付ける口実にしないこと
 4. **自前パッドの入力は `EJS_emulator.gameManager.simulateInput(0, ボタン番号, 0/1)` で送っている**。番号はlibretroのRetroPad順（`0:B 1:Y 2:SELECT 3:START 4:上 5:下 6:左 7:右 8:A 9:X 10:L 11:R`）で、EmulatorJS側の内部APIなので更新で壊れうる。壊れたときのために `keyCode` 付きの KeyboardEvent を送る保険（`KEYCODE`）を残してある
 5. **パッドの当たり判定は要素の `getBoundingClientRect()` をキャッシュして座標で行う**（十字キーの斜め入力・同時押し・指を滑らせての持ち替えのため）。回転／全画面切替／指を全部離したタイミングで採寸し直しているので、レイアウトを変えたら `padMeasure()` が呼ばれる経路も確認すること
-6. デバッグ時、ブラウザの通常キャッシュクリアだけではService Workerのキャッシュは消えない。DevTools の Application → Service Workers → Unregister、または Storage → Clear site data が必要
+6. **iOSはアプリを裏に回す・画面を消す・電話などの割り込みで AudioContext を suspended / interrupted にし、戻ってきても自動再開しない**（中断→再開で音だけ出なくなる）。復帰には `resume()` が必要で、しかもユーザー操作の中から呼ぶ必要がある。EmulatorJS内部のどこに AudioContext があるかは実装依存なので、**コンストラクタを先回りして包み（`watchAudio()`）、作られたものを `audioCtxs` に全部登録**している。この包み込みは `loader.js` を読み込むより前に実行されている必要があるので、順序を崩さないこと
+7. デバッグ時、ブラウザの通常キャッシュクリアだけではService Workerのキャッシュは消えない。DevTools の Application → Service Workers → Unregister、または Storage → Clear site data が必要
 
 ## 開発フロー
 1. `index.html` / `sw.js` を編集
