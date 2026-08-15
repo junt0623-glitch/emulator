@@ -206,9 +206,10 @@ label.f{display:block;font-family:var(--mono);font-size:11px;color:var(--dim);ma
 input[type=text],select{width:100%;background:#15181f;color:var(--ivory);border:1px solid var(--edge);
   border-radius:4px;padding:10px;font-family:var(--mono);font-size:13px;min-height:44px}
 p.help{font-size:12.5px;color:var(--dim);line-height:1.7;margin:8px 0 0}
-#diag{background:#15181f;border:1px solid var(--edge);border-radius:4px;padding:10px;margin:0;
+#diag,#probe{background:#15181f;border:1px solid var(--edge);border-radius:4px;padding:10px;margin:0;
   font-family:var(--mono);font-size:11px;line-height:1.6;color:var(--dim);
   white-space:pre-wrap;word-break:break-all;-webkit-user-select:text;user-select:text}
+#probe{max-height:40vh;overflow:auto;margin-top:8px}
 #toast{position:fixed;left:50%;bottom:calc(18px + env(safe-area-inset-bottom));transform:translateX(-50%);
   background:#0d1015;border:1px solid var(--edge);color:var(--ivory);font-family:var(--mono);font-size:12px;
   padding:10px 16px;border-radius:20px;opacity:0;pointer-events:none;transition:opacity .2s;z-index:99;max-width:88vw;text-align:center}
@@ -330,6 +331,15 @@ p.help{font-size:12.5px;color:var(--dim);line-height:1.7;margin:8px 0 0}
 
     <div class="legend">セーブ枠</div>
     <div class="slots" id="slots"></div>
+
+    <details id="probeBox">
+      <summary>画面の要素を調べる（不具合報告用）</summary>
+      <div class="body">
+        <p class="help">画面に出ている文字が消せないときに使います。<b>その文字が出ている状態で</b>下のボタンを押し、出てきた内容をそのまま伝えてください。</p>
+        <button id="probeBtn">いま画面にある要素を書き出す</button>
+        <pre id="probe">未実行</pre>
+      </div>
+    </details>
 
     <div class="row" style="margin-top:16px">
       <button id="deckClose">閉じる</button>
@@ -692,16 +702,26 @@ async function boot(){
    3) 速度切替の直後だけ短時間走査する
       （既存要素の文字を差し替える実装だと 2 で拾えないことがあるため） */
 const FF_MSG=/fast[\s._-]*forward/i;
+/* 自前UI（診断表示に文字列が載ることがある）は対象外にする */
+const FF_SKIP="#deck,#bar,#toast,#picker,details";
 function ffHideIn(node){
   if(!node||node.nodeType!==1) return;
-  const list=[node].concat(node.querySelectorAll?[...node.querySelectorAll("*")]:[]);
-  for(const el of list){
-    if(el.children.length) continue;                 // 文字を持つ末端だけ見る
+  const root=node.querySelectorAll?node:node.parentElement;
+  if(!root||!root.querySelectorAll) return;
+  // 文字が一致する要素を全部拾う（末端だけに限らない。入れ子で分割されていても効くように）
+  const hits=[];
+  for(const el of [root,...root.querySelectorAll("*")]){
+    if(el.closest&&el.closest(FF_SKIP)) continue;
     const t=(el.textContent||"").trim();
     if(!t||t.length>32||!FF_MSG.test(t)) continue;
-    el.style.display="none";
-    const box=el.parentElement;                      // 入れ物ごと隠す（枠だけ残るのを防ぐ）
-    if(box&&box!==$("#screen")&&/msg|message|notif/i.test(box.className||"")) box.style.display="none";
+    hits.push(el);
+  }
+  // 一致する子孫を持つものは除き、いちばん深い要素だけ隠す（画面ごと消さないため）
+  for(const el of hits.filter(el=>!hits.some(o=>o!==el&&el.contains(o)))){
+    el.style.setProperty("display","none","important");
+    const box=el.parentElement;                      // 枠だけ残るのを防ぐ
+    if(box&&box!==$("#screen")&&/msg|message|notif|toast|osd/i.test((box.className||"")+""))
+      box.style.setProperty("display","none","important");
   }
 }
 function ffSilenceApi(){
@@ -718,15 +738,46 @@ let ffSweepT;
 function ffSweep(){
   ffSilenceApi(); clearInterval(ffSweepT);
   let n=0;
-  ffSweepT=setInterval(()=>{ ffHideIn($("#screen")); if(++n>15) clearInterval(ffSweepT); },200);
+  ffSweepT=setInterval(()=>{ ffHideIn(document.body); if(++n>30) clearInterval(ffSweepT); },200);
 }
+/* 画面の外（body直下や全画面用の入れ物）に出す実装もありうるので body 全体を見る */
+/* 画面に重なっている要素を書き出す。
+   消せない文字がDOMにあるのか、それともcanvasの中に描かれているのかを
+   実機で切り分けるため（こちらからは EmulatorJS の実物を確認できないため） */
+function probeText(){
+  const scr=$("#screen");
+  if(!scr) return "実行画面がありません";
+  // EmulatorJS が作ったもの（画面の中）＋ body直下に出された重なりだけを写す
+  const targets=[...scr.querySelectorAll("*"),
+    ...[...document.body.children].filter(el=>!el.matches(".wrap,#toast"))];
+  const L=[], seen=[];
+  for(const el of targets){
+    const r=el.getBoundingClientRect();
+    const own=[...el.childNodes].filter(n=>n.nodeType===3).map(n=>n.textContent.trim()).join(" ").trim();
+    if(!own && r.width*r.height===0) continue;
+    const cls=(el.className||"").toString().trim().replace(/\s+/g,".");
+    L.push(`${el.tagName.toLowerCase()}${cls?"."+cls:""} [${Math.round(r.x)},${Math.round(r.y)} ${Math.round(r.width)}x${Math.round(r.height)}]`
+      +(own?` "${own.slice(0,40)}"`:"")
+      +(getComputedStyle(el).display==="none"?" (非表示)":""));
+    if(own) seen.push(own);
+  }
+  const ff=seen.some(t=>FF_MSG.test(t));
+  L.unshift(ff ? "→ 早送りの文字はDOMにあります（隠せるはず）"
+               : "→ 早送りの文字はDOMに見当たりません。canvasの中に描かれている可能性が高いです");
+  L.unshift("要素数: "+L.length);
+  return L.join("\n");
+}
+$("#probeBtn").addEventListener("click",()=>{ $("#probe").textContent=probeText(); });
+
 new MutationObserver(ms=>{
   ffSilenceApi();
   for(const m of ms){
     m.addedNodes.forEach(ffHideIn);
     if(m.type==="characterData") ffHideIn(m.target.parentElement);
   }
-}).observe($("#screen"),{childList:true,subtree:true,characterData:true});
+}).observe(document.body,{childList:true,subtree:true,characterData:true});
+/* 監視で拾えない出し方（属性やCSSでの出し入れ等）に備えた保険 */
+setInterval(()=>{ if(!$("#runner").classList.contains("hidden")) ffHideIn(document.body); },1000);
 
 /* ---------- 速度 ---------- */
 let currentSpeed=1;
