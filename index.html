@@ -89,6 +89,8 @@ button.key{border-color:#5c5231;background:linear-gradient(#3a3421,#2b2718);colo
 /* ---- screen ---- */
 #bar{display:flex;gap:8px;align-items:center;margin:0 0 12px}
 #bar button{padding:9px 13px;min-height:40px;font-size:13px;white-space:nowrap}
+#padBtn[aria-pressed="true"]{border-color:#5c5231;background:linear-gradient(#3a3421,#2b2718);color:#f0dfa8}
+#padBtn[aria-pressed="false"]{opacity:.75}
 #romTitle{font-family:var(--mono);font-size:11px;color:var(--dim);flex:1;min-width:0;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #menuBtn,#deckClose,.pad-side,#deckBg{display:none}
@@ -282,7 +284,7 @@ p.help{font-size:12.5px;color:var(--dim);line-height:1.7;margin:8px 0 0}
     <div id="bar">
       <button id="backBtn">‹ ROM選択</button>
       <span id="romTitle"></span>
-      <button id="padBtn" aria-pressed="false">パッド</button>
+      <button id="padBtn" aria-pressed="false">パッド OFF</button>
       <button id="fsBtn">全画面</button>
       <button id="menuBtn">メニュー</button>
     </div>
@@ -654,6 +656,10 @@ async function boot(){
   $("#romTitle").textContent=rec.name;
   document.body.classList.add("sys-"+rec.sys);
   setPad(padWanted());
+  // タッチ端末なのに自前パッドがオフだと、内蔵パッドが画面に重なり、
+  // 拡大防止も効かない。気付けるように一度だけ知らせる
+  if(!padWanted() && (matchMedia("(pointer:coarse)").matches || navigator.maxTouchPoints>0))
+    setTimeout(()=>toast("自前パッドは非表示です。上の「パッド OFF」を押すと表示されます"),1400);
   renderSlots();
 
   window.EJS_player="#screen";
@@ -701,28 +707,46 @@ async function boot(){
    2) 画面内に足された要素を監視し、該当する文字を持つものを隠す
    3) 速度切替の直後だけ短時間走査する
       （既存要素の文字を差し替える実装だと 2 で拾えないことがあるため） */
-const FF_MSG=/fast[\s._-]*forward/i;
+/* 文字ノード単位で消すので、丸ごと一致するものだけを対象にする。
+   歯車メニューの「Fast Forward Ratio」などを巻き添えにしないため */
+const FF_MSG=/^fast[\s._-]*forward[\s.!]*$/i;
 /* 自前UI（診断表示に文字列が載ることがある）は対象外にする */
 const FF_SKIP="#deck,#bar,#toast,#picker,details";
 function ffHideIn(node){
-  if(!node||node.nodeType!==1) return;
-  const root=node.querySelectorAll?node:node.parentElement;
+  const root=(node&&node.nodeType===1)?node:(node&&node.parentElement);
   if(!root||!root.querySelectorAll) return;
-  // 文字が一致する要素を全部拾う（末端だけに限らない。入れ子で分割されていても効くように）
+  /* 要素ではなく【文字ノード】を見る。
+     EmulatorJS は他のボタンと同じ入れ物の中に、要素に包まないまま
+     「Fast-Forward」の文字を置く。要素を隠す方式では、
+     ・その文字だけを持つ要素が存在しない
+     ・親は他のボタン名も含むので巨大
+     となって取りこぼす。文字ノードなら確実に捕まえられる */
+  const w=document.createTreeWalker(root,NodeFilter.SHOW_TEXT);
   const hits=[];
-  for(const el of [root,...root.querySelectorAll("*")]){
+  for(let n=w.nextNode();n;n=w.nextNode()){
+    const t=(n.textContent||"").trim();
+    if(!t||!FF_MSG.test(t)) continue;
+    const p=n.parentElement;
+    if(!p||(p.closest&&p.closest(FF_SKIP))) continue;
+    hits.push(n);
+  }
+  for(const n of hits){
+    const p=n.parentElement;
+    n.textContent="";                                       // 文字だけ消す
+    if(p&&!p.children.length&&!p.textContent.trim())          // 空の入れ物が残るなら隠す
+      p.style.setProperty("display","none","important");
+  }
+  /* 文字が子要素に分割されている場合（<span>Fast</span><span>-Forward.</span> 等）は
+     文字ノード単位では一致しない。要素の全文がぴったり一致するものだけを隠す。
+     「全文が一致」に限るので「Fast Forward Ratio」のような設定名は巻き込まない */
+  const els=[];
+  for(const el of root.querySelectorAll("*")){
     if(el.closest&&el.closest(FF_SKIP)) continue;
-    const t=(el.textContent||"").trim();
-    if(!t||t.length>32||!FF_MSG.test(t)) continue;
-    hits.push(el);
+    if(!FF_MSG.test((el.textContent||"").trim())) continue;
+    els.push(el);
   }
-  // 一致する子孫を持つものは除き、いちばん深い要素だけ隠す（画面ごと消さないため）
-  for(const el of hits.filter(el=>!hits.some(o=>o!==el&&el.contains(o)))){
+  for(const el of els.filter(el=>!els.some(o=>o!==el&&el.contains(o))))
     el.style.setProperty("display","none","important");
-    const box=el.parentElement;                      // 枠だけ残るのを防ぐ
-    if(box&&box!==$("#screen")&&/msg|message|notif|toast|osd/i.test((box.className||"")+""))
-      box.style.setProperty("display","none","important");
-  }
 }
 function ffSilenceApi(){
   const emu=window.EJS_emulator;
@@ -761,7 +785,7 @@ function probeText(){
       +(getComputedStyle(el).display==="none"?" (非表示)":""));
     if(own) seen.push(own);
   }
-  const ff=seen.some(t=>FF_MSG.test(t));
+  const ff=seen.some(t=>/fast[\s._-]*forward/i.test(t));
   L.unshift(ff ? "→ 早送りの文字はDOMにあります（隠せるはず）"
                : "→ 早送りの文字はDOMに見当たりません。canvasの中に描かれている可能性が高いです");
   L.unshift("要素数: "+L.length);
@@ -962,7 +986,10 @@ function padWanted(){
 function setPad(on){
   padRelease();
   document.body.classList.toggle("pad-on",on);
+  // 状態が見て分かるようにする。オフだと内蔵パッドが画面に重なり、
+  // 拡大防止も効かなくなるのに、以前は押した本人にも分からなかった
   $("#padBtn").setAttribute("aria-pressed",String(on));
+  $("#padBtn").textContent = on ? "パッド ON" : "パッド OFF";
   try{ window.EJS_emulator.changeSettingOption("virtual-gamepad",on?"disabled":"enabled"); }catch(e){}
   setTimeout(padMeasure,60);
 }
