@@ -692,6 +692,11 @@ async function boot(){
     },3000);
   };
 
+  // retroarch.cfg が書かれる瞬間を捕まえたいので、本体を読み込む前から張り込む
+  raPatchFS();
+  raTimer=setInterval(raPatchFS,10);
+  setTimeout(()=>clearInterval(raTimer),90000);
+
   const coresBefore=await cachedCores();   // 起動前のコア一覧（差分で機種を特定する）
   try{ await loadScript(EJS_CDN+"loader.js"); }
   catch(e){ toast(navigator.onLine
@@ -758,6 +763,53 @@ function ffSilenceApi(){
   };
   emu.__ffQuiet=true;
 }
+/* =========================================================
+   RetroArch の早送りインジケータを止める
+
+   「Fast-Forward.」は EmulatorJS のDOMではなく、RetroArch が
+   ゲーム画面（canvas）の中に直接描いている。DOM側からは消せないので、
+   RetroArch の設定 notification_show_fast_forward を false にする。
+
+   設定は起動時に retroarch.cfg から読まれる。EmulatorJS がその
+   ファイルを書き出す瞬間を捕まえるため、Emscripten の FS.writeFile を
+   包んで、書き込まれる内容に設定を足す。
+   ========================================================= */
+const RA_OFF={
+  notification_show_fast_forward:"false",   // 早送り中の常時表示
+  fastforward_show_notification:"false"     // 版によって名前が違う場合に備える
+};
+function raPatchCfg(text){
+  let out=String(text);
+  for(const k in RA_OFF){
+    out=out.replace(new RegExp("^\\s*"+k+"\\s*=.*$","gmi"),"");   // 既存行を消して
+    out+="\n"+k+' = "'+RA_OFF[k]+'"\n';                          // 確実に足す
+  }
+  return out;
+}
+let raPatched=false, raTimer=0;
+function raPatchFS(){
+  if(raPatched) return;
+  const emu=window.EJS_emulator;
+  const mods=[emu&&emu.Module, emu&&emu.gameManager&&emu.gameManager.Module, window.Module];
+  for(const m of mods){
+    const FS=(m&&m.FS)||(emu&&emu.gameManager&&emu.gameManager.FS);
+    if(!FS||typeof FS.writeFile!=="function"||FS.__raPatched) continue;
+    const orig=FS.writeFile.bind(FS);
+    FS.writeFile=function(path,data,opts){
+      try{
+        if(typeof path==="string"&&/retroarch\.cfg$/i.test(path)){
+          if(typeof data==="string") data=raPatchCfg(data);
+          else if(data&&data.buffer) data=new TextEncoder().encode(raPatchCfg(new TextDecoder().decode(data)));
+        }
+      }catch(e){}
+      return orig(path,data,opts);
+    };
+    FS.__raPatched=true; raPatched=true;
+    clearInterval(raTimer);
+    return;
+  }
+}
+
 let ffSweepT;
 function ffSweep(){
   ffSilenceApi(); clearInterval(ffSweepT);
