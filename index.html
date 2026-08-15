@@ -683,9 +683,55 @@ async function boot(){
     : "オフラインでは起動できません。一度オンラインで起動すると、次回から機内モードでも動きます。"); }
 }
 
+/* ---------- 早送りメッセージの抑制 ---------- */
+/* 速度を切り替えると EmulatorJS が画面の隅に「Fast-Forward.」と出す。
+   こちらに速度スイッチがあるので不要なうえ、ゲーム画面に重なって邪魔になる。
+   表示の出所は EmulatorJS 内部なので、実装に依存しないよう三段構えで消す。
+   1) メッセージ表示APIを包んで、早送り関連の文言だけ握りつぶす
+   2) 画面内に足された要素を監視し、該当する文字を持つものを隠す
+   3) 速度切替の直後だけ短時間走査する
+      （既存要素の文字を差し替える実装だと 2 で拾えないことがあるため） */
+const FF_MSG=/fast[\s._-]*forward/i;
+function ffHideIn(node){
+  if(!node||node.nodeType!==1) return;
+  const list=[node].concat(node.querySelectorAll?[...node.querySelectorAll("*")]:[]);
+  for(const el of list){
+    if(el.children.length) continue;                 // 文字を持つ末端だけ見る
+    const t=(el.textContent||"").trim();
+    if(!t||t.length>32||!FF_MSG.test(t)) continue;
+    el.style.display="none";
+    const box=el.parentElement;                      // 入れ物ごと隠す（枠だけ残るのを防ぐ）
+    if(box&&box!==$("#screen")&&/msg|message|notif/i.test(box.className||"")) box.style.display="none";
+  }
+}
+function ffSilenceApi(){
+  const emu=window.EJS_emulator;
+  if(!emu||emu.__ffQuiet||typeof emu.displayMessage!=="function") return;
+  const orig=emu.displayMessage;
+  emu.displayMessage=function(m,...r){
+    if(typeof m==="string"&&FF_MSG.test(m)) return;  // 早送り以外の通知は残す
+    return orig.call(this,m,...r);
+  };
+  emu.__ffQuiet=true;
+}
+let ffSweepT;
+function ffSweep(){
+  ffSilenceApi(); clearInterval(ffSweepT);
+  let n=0;
+  ffSweepT=setInterval(()=>{ ffHideIn($("#screen")); if(++n>15) clearInterval(ffSweepT); },200);
+}
+new MutationObserver(ms=>{
+  ffSilenceApi();
+  for(const m of ms){
+    m.addedNodes.forEach(ffHideIn);
+    if(m.type==="characterData") ffHideIn(m.target.parentElement);
+  }
+}).observe($("#screen"),{childList:true,subtree:true,characterData:true});
+
 /* ---------- 速度 ---------- */
 let currentSpeed=1;
 function applySpeed(n,quiet){
+  ffSweep();                       // 切替で出る「Fast-Forward.」を消す
   const gm=window.EJS_emulator?.gameManager; let ok=false;
   try{
     if(gm){
