@@ -333,6 +333,7 @@ p.help{font-size:12.5px;color:var(--dim);line-height:1.7;margin:8px 0 0}
 
     <div class="legend">セーブ枠</div>
     <div class="slots" id="slots"></div>
+    <p class="note" id="slotNote"></p>
 
     <details id="probeBox">
       <summary>画面の要素を調べる（不具合報告用）</summary>
@@ -1024,31 +1025,70 @@ async function renderSlots(){
     el.className="slot"+(rec?" filled":"");
     el.innerHTML=`<div class="thumb" style="${rec?.thumb?`background-image:url(${rec.thumb})`:""}"></div>
       <div class="meta"><div class="n">枠 ${n}</div>
-      <div class="t">${rec?new Date(rec.at).toLocaleString("ja-JP",{month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"}):"空き"}</div></div>
+      <div class="t">${rec?new Date(rec.at).toLocaleString("ja-JP",{month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"}):"空き"}</div>
+      ${rec?`<div class="n">${(()=>{const u=toU8(rec.state);return u&&u.length?sizeText(u.length):"データ無し";})()}</div>`:""}</div>
       <div class="acts"><button data-save="${n}">保存</button>
       <button data-load="${n}" ${rec?"":"disabled"}>読込</button></div>`;
     host.appendChild(el);
   }
 }
+/* セーブ状態はバイト列。版によって返る形が違うので必ず Uint8Array に揃える。
+   WASMのメモリを指す view のこともあるので、保存時は必ず複製する */
+function toU8(v){
+  try{
+    if(v==null) return null;
+    if(v instanceof Uint8Array) return v;
+    if(v instanceof ArrayBuffer) return new Uint8Array(v);
+    if(ArrayBuffer.isView(v)) return new Uint8Array(v.buffer,v.byteOffset,v.byteLength);
+    if(Array.isArray(v)) return new Uint8Array(v);
+    if(typeof v==="object"&&typeof v.length==="number") return new Uint8Array(v);
+  }catch(e){}
+  return null;
+}
+function slotNote(msg){ $("#slotNote").textContent=msg; toast(msg); }
+/* 1KB未満はバイト表示にする。小さすぎる保存に気付けるように */
+function sizeText(n){ return n<1024 ? n+" B" : Math.round(n/1024)+" KB"; }
+
 $("#slots").addEventListener("click", async e=>{
   const s=e.target.closest("[data-save]"), l=e.target.closest("[data-load]");
-  const gm=window.EJS_emulator?.gameManager;
-  if(!gm){ toast("ゲームを開始してから操作してください"); return; }
+  if(!s&&!l) return;
+  const gm=window.EJS_emulator&&window.EJS_emulator.gameManager;
+  if(!gm){ slotNote("ゲームを開始してから操作してください"); return; }
   try{
     if(s){
       const n=+s.dataset.save;
-      const state=await gm.getState();
+      if(typeof gm.getState!=="function"){ slotNote("この版のEmulatorJSには保存APIがありません"); return; }
+      let state=await gm.getState();
+      if(state&&state.data) state=state.data;          // 包まれて返る版に備える
+      const u8=toU8(state);
+      if(!u8||!u8.length){ slotNote("保存できません：本体が状態を返しませんでした"); return; }
+      const copy=new Uint8Array(u8);                    // WASMメモリから切り離す
       let thumb=""; try{ thumb=EJS_emulator.canvas.toDataURL("image/jpeg",0.5); }catch(_){}
-      await dbPut("states",ROMKEY+":"+n,{state,thumb,at:Date.now(),name:ROMNAME});
-      await renderSlots(); toast("枠 "+n+" に保存しました");
+      await dbPut("states",ROMKEY+":"+n,{state:copy,thumb,at:Date.now(),name:ROMNAME,size:copy.length});
+      await renderSlots();
+      slotNote("枠 "+n+" に保存しました（"+sizeText(copy.length)+"）");
     }
     if(l){
       const n=+l.dataset.load;
       const rec=await dbGet("states",ROMKEY+":"+n);
-      if(!rec){ toast("枠 "+n+" は空です"); return; }
-      await gm.loadState(rec.state); toast("枠 "+n+" を読み込みました");
+      if(!rec){ slotNote("枠 "+n+" は空です"); return; }
+      const u8=toU8(rec.state);
+      if(!u8||!u8.length){ slotNote("枠 "+n+" のデータが空です。古い版で保存された可能性があります。保存し直してください"); return; }
+      // 版によって置き場所が違うので順に試す
+      const fns=[gm.loadState, gm.functions&&gm.functions.loadState, window.EJS_emulator.loadState]
+        .filter(f=>typeof f==="function");
+      if(!fns.length){ slotNote("この版のEmulatorJSには読込APIがありません"); return; }
+      let done=false, last="";
+      for(const f of fns){
+        try{ await f.call(gm,new Uint8Array(u8)); done=true; break; }
+        catch(err){ last=(err&&err.message)?err.message:String(err); }
+      }
+      slotNote(done ? "枠 "+n+" を読み込みました（"+sizeText(u8.length)+"）"
+                    : "読込に失敗しました: "+last);
     }
-  }catch(err){ toast("状態の保存・読込に失敗しました（歯車メニューの保存機能をお試しください）"); }
+  }catch(err){
+    slotNote("失敗: "+((err&&err.message)?err.message:err));
+  }
 });
 
 /* ---------- 全画面 / 戻る ---------- */
