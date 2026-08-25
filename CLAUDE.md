@@ -31,7 +31,8 @@ GBA/NDSは一度実装したが、施設のセキュリティソフト（ウイ�
 5. **パッドの当たり判定は要素の `getBoundingClientRect()` をキャッシュして座標で行う**（十字キーの斜め入力・同時押し・指を滑らせての持ち替えのため）。回転／全画面切替／指を全部離したタイミングで採寸し直しているので、レイアウトを変えたら `padMeasure()` が呼ばれる経路も確認すること
 6. **iOSはアプリを裏に回す・画面を消す・電話などの割り込みで AudioContext を suspended / interrupted にし、戻ってきても自動再開しない**（中断→再開で音だけ出なくなる）。復帰には `resume()` が必要で、しかもユーザー操作の中から呼ぶ必要がある。EmulatorJS内部のどこに AudioContext があるかは実装依存なので、**コンストラクタを先回りして包み（`watchAudio()`）、作られたものを `audioCtxs` に全部登録**している。この包み込みは `loader.js` を読み込むより前に実行されている必要があるので、順序を崩さないこと
 7. **RetroArchが画面に出す文字（早送り中の「Fast-Forward.」等）はDOMではなく canvas の中に描かれる**ので、CSSでもJSでも消せない。これを消そうとして **Emscripten の `FS.writeFile` を包み `retroarch.cfg` に設定を足す方式を入れたが、セーブ状態の読込も同じ `FS` を通るため「読込が反応しない」状態になり、撤去した**。**EmulatorJS内部の `FS` には触れないこと。** 実物を手元で検証できない以上、動いている機能を壊すリスクのほうが大きい。早送り表示は現状「消せないもの」として受け入れる（等速なら出ない）
-8. デバッグ時、ブラウザの通常キャッシュクリアだけではService Workerのキャッシュは消えない。DevTools の Application → Service Workers → Unregister、または Storage → Clear site data が必要
+8. **RetroArch(Emscripten)の描画ループは音声バッファの消費に同期しているので、iOSで AudioContext が止まっていると数フレーム（実機で frame 4）で詰まり、本体ごと動かなくなる**。`paused` は false のまま、画面だけ真っ黒になるので原因が分かりにくい。`gameManager.getFrameNum()` を間隔をあけて2回読み、増えていなければ止まっていると判定できる。復帰は「音を再開 → `toggleMainLoop(1)` → `play()`」の順で、**iOSは操作の中でしか音を戻せない**ため、止まっている間は全てのタップで復帰を試みている
+9. デバッグ時、ブラウザの通常キャッシュクリアだけではService Workerのキャッシュは消えない。DevTools の Application → Service Workers → Unregister、または Storage → Clear site data が必要
 
 ## 開発フロー
 1. `index.html` / `sw.js` を編集
