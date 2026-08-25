@@ -338,8 +338,8 @@ p.help{font-size:12.5px;color:var(--dim);line-height:1.7;margin:8px 0 0}
     <details id="probeBox">
       <summary>画面の要素を調べる（不具合報告用）</summary>
       <div class="body">
-        <p class="help">画面に出ている文字が消せないときに使います。<b>その文字が出ている状態で</b>下のボタンを押し、出てきた内容をそのまま伝えてください。</p>
-        <button id="probeBtn">いま画面にある要素を書き出す</button>
+        <p class="help">うまく動かないときに使います。<b>その状態のまま</b>下のボタンを押し、出てきた内容をそのまま伝えてください。本体のAPIの形と、画面に重なっている要素が出ます。</p>
+        <button id="probeBtn">いまの状態を書き出す</button>
         <pre id="probe">未実行</pre>
       </div>
     </details>
@@ -798,7 +798,35 @@ function probeText(){
   L.unshift("要素数: "+L.length);
   return L.join("\n");
 }
-$("#probeBtn").addEventListener("click",()=>{ $("#probe").textContent=probeText(); });
+/* EmulatorJS 側のAPIの形を書き出す。
+   こちらからは実物を確認できないため、引数の数や関数名を実機に報告させる */
+function apiText(){
+  const e=window.EJS_emulator, gm=e&&e.gameManager;
+  if(!e) return "本体がまだ読み込まれていません";
+  const L=[];
+  const kind=(o,k)=>{ try{ const v=o[k];
+    return typeof v==="function" ? "関数("+v.length+"引数)" : (v===undefined?"無し":String(v)); }
+    catch(_){ return "取得不可"; } };
+  const fnsOf=o=>{ const out=new Set();
+    for(let p=o; p && p!==Object.prototype; p=Object.getPrototypeOf(p)){
+      for(const k of Object.getOwnPropertyNames(p)){
+        try{ if(typeof o[k]==="function") out.add(k+"/"+o[k].length); }catch(_){}
+      }
+    }
+    return [...out].sort(); };
+  L.push("core: "+(window.EJS_core||"?"));
+  L.push("paused: "+kind(e,"paused")+" / play: "+kind(e,"play")+" / pause: "+kind(e,"pause"));
+  if(e.canvas) L.push("canvas: "+e.canvas.width+"x"+e.canvas.height);
+  if(gm){
+    L.push("getState: "+kind(gm,"getState")+" / loadState: "+kind(gm,"loadState"));
+    L.push("gameManager の関数:");
+    L.push("  "+fnsOf(gm).join(", "));
+  } else L.push("gameManager が無い");
+  return L.join("\n");
+}
+$("#probeBtn").addEventListener("click",()=>{
+  $("#probe").textContent = apiText() + "\n\n--- 画面の要素 ---\n" + probeText();
+});
 
 new MutationObserver(ms=>{
   ffSilenceApi();
@@ -1083,7 +1111,13 @@ $("#slots").addEventListener("click", async e=>{
         try{ await f.call(gm,new Uint8Array(u8)); done=true; break; }
         catch(err){ last=(err&&err.message)?err.message:String(err); }
       }
-      slotNote(done ? "枠 "+n+" を読み込みました（"+sizeText(u8.length)+"）"
+      // 読込は通っても本体が止まったままだと画面が黒いままになる。動かし直す
+      let resumed="";
+      try{
+        const e2=window.EJS_emulator;
+        if(e2&&e2.paused&&typeof e2.play==="function"){ e2.play(); resumed="／再開しました"; }
+      }catch(_){}
+      slotNote(done ? "枠 "+n+" を読み込みました（"+sizeText(u8.length)+"）"+resumed
                     : "読込に失敗しました: "+last);
     }
   }catch(err){
