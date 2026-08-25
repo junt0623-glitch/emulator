@@ -339,7 +339,8 @@ p.help{font-size:12.5px;color:var(--dim);line-height:1.7;margin:8px 0 0}
       <summary>画面の要素を調べる（不具合報告用）</summary>
       <div class="body">
         <p class="help">うまく動かないときに使います。<b>その状態のまま</b>下のボタンを押し、出てきた内容をそのまま伝えてください。本体のAPIの形と、画面に重なっている要素が出ます。</p>
-        <button id="probeBtn">いまの状態を書き出す</button>
+        <button id="reviveBtn">本体を動かし直す</button>
+        <button id="probeBtn" style="margin-left:8px">いまの状態を書き出す</button>
         <pre id="probe">未実行</pre>
       </div>
     </details>
@@ -422,9 +423,16 @@ async function resumeAudio(){
    ユーザー操作の扱いに影響しない） */
 ["visibilitychange","pageshow","focus","resume"].forEach(t=>
   addEventListener(t,()=>{ if(!document.hidden) resumeAudio(); }));
+let emuStalled=false;   // 本体の描画が止まっているか
 let audioWarned=false;
 ["pointerdown","touchend","click","keydown"].forEach(t=>
   addEventListener(t,()=>{
+    // 止まっているなら、操作のなかでしか出来ない復帰をここで試す
+    if(emuStalled){
+      resumeAudio();
+      try{ const g=window.EJS_emulator&&window.EJS_emulator.gameManager;
+        if(g&&typeof g.toggleMainLoop==="function") g.toggleMainLoop(1); }catch(_){}
+    }
     if(!audioCtxs.length || !audioStuck()) return;
     resumeAudio();
     // 操作のなかで resume しても戻らない場合だけ、一度だけ知らせる
@@ -684,6 +692,17 @@ async function boot(){
     setPad(document.body.classList.contains("pad-on"));   // 内蔵パッド設定を再適用＋採寸
     // この機種がどのコアを使ったかを控える（オフライン可否を正確に判定するため）。
     // Service Worker の保存は非同期なので少し待ってから見る
+    // 本体が実際に描画しているかを確かめる。止まっていれば動かし直す
+    setTimeout(async ()=>{
+      const g=window.EJS_emulator&&window.EJS_emulator.gameManager;
+      if(!g) return;
+      const f=await emuFrames(g,600);
+      if(f&&!f.alive){
+        emuStalled=true;
+        const r=await emuRevive(g);
+        if(!r.alive) slotNote("本体が動いていません（frame "+r.to+"）。ゲーム画面を一度タップしてください");
+      }
+    },2500);
     setTimeout(async ()=>{
       const now=await cachedCores();
       const added=now.filter(u=>!coresBefore.includes(u));
@@ -828,8 +847,33 @@ function apiText(){
   } else L.push("gameManager が無い");
   return L.join("\n");
 }
-$("#probeBtn").addEventListener("click",()=>{
-  $("#probe").textContent = apiText() + "\n\n--- 画面の要素 ---\n" + probeText();
+/* 動いているか・音が生きているかを実測して先頭に出す */
+async function emuReport(){
+  const gm=window.EJS_emulator&&window.EJS_emulator.gameManager;
+  if(!gm) return "本体がまだ読み込まれていません";
+  const L=[];
+  const f=await emuFrames(gm,400);
+  L.push(f ? "frame: "+f.from+" → "+f.to+(f.alive?"（動いています）":"（進んでいません＝止まっています）")
+           : "frame: 取得できません");
+  collectAudio();
+  L.push("音声: "+(audioCtxs.length?audioCtxs.map(c=>c.state).join(", "):"未捕捉")
+    +(audioCtxs.some(c=>c.state!=="running")?" ← running でないと本体が止まります":""));
+  return L.join("\n");
+}
+$("#probeBtn").addEventListener("click", async ()=>{
+  $("#probe").textContent="調べています…";
+  $("#probe").textContent = (await emuReport()) + "\n\n" + apiText()
+    + "\n\n--- 画面の要素 ---\n" + probeText();
+});
+$("#reviveBtn").addEventListener("click", async ()=>{
+  const gm=window.EJS_emulator&&window.EJS_emulator.gameManager;
+  if(!gm){ slotNote("ゲームを開始してから操作してください"); return; }
+  slotNote("動かし直しています…");
+  const f=await emuFrames(gm,300);
+  if(f&&f.alive){ emuStalled=false; slotNote("本体は動いています（frame "+f.to+"）"); return; }
+  const r=await emuRevive(gm);
+  slotNote(r.alive ? "動き出しました（"+r.how+"／frame "+r.to+"）"
+                   : "まだ止まっています（frame "+r.to+"）");
 });
 
 new MutationObserver(ms=>{
@@ -1091,12 +1135,25 @@ async function emuFrames(gm,ms){
     return {from:a,to:b,alive:b>a};
   }catch(e){ return null; }
 }
-/* 止まっていたら動かし直す。実在する API だけを使う */
+/* 止まっていたら段階的に動かし直す。実在する API だけを使う。
+   RetroArch(Emscripten) の描画ループは音声バッファの消費に同期しているため、
+   iOS で AudioContext が止まっていると数フレームで詰まって動かなくなる。
+   そのため最初に音を戻す */
 async function emuRevive(gm){
-  try{ if(typeof gm.toggleMainLoop==="function") gm.toggleMainLoop(1); }catch(_){}
-  try{ const e=window.EJS_emulator;
-    if(e&&e.paused&&typeof e.play==="function") e.play(); }catch(_){}
-  return await emuFrames(gm,300);
+  const steps=[
+    ["音を再開", async()=>{ await resumeAudio(); }],
+    ["ループ再開", async()=>{ if(typeof gm.toggleMainLoop==="function") gm.toggleMainLoop(1); }],
+    ["再生", async()=>{ const e=window.EJS_emulator;
+        if(e&&typeof e.play==="function") e.play(); }],
+  ];
+  for(const [name,fn] of steps){
+    try{ await fn(); }catch(_){}
+    const f=await emuFrames(gm,300);
+    if(f&&f.alive){ emuStalled=false; return {alive:true,how:name,to:f.to}; }
+  }
+  emuStalled=true;
+  const f=await emuFrames(gm,300);
+  return {alive:false,to:f?f.to:"?"};
 }
 /* 1KB未満はバイト表示にする。小さすぎる保存に気付けるように */
 function sizeText(n){ return n<1024 ? n+" B" : Math.round(n/1024)+" KB"; }
@@ -1144,9 +1201,10 @@ $("#slots").addEventListener("click", async e=>{
       let extra="";
       const st=await emuFrames(gm);
       if(st&&!st.alive){
-        const st2=await emuRevive(gm);
-        extra = (st2&&st2.alive) ? "／止まっていたので動かし直しました"
-                                 : "／本体が止まったままです（frame "+st.to+"）";
+        emuStalled=true;
+        const r=await emuRevive(gm);
+        extra = r.alive ? "／止まっていたので動かし直しました（"+r.how+"）"
+                        : "／本体が止まったままです（frame "+r.to+"）。ゲーム画面を一度タップしてください";
       }
       slotNote("枠 "+n+" を読み込みました（"+sizeText(u8.length)+"）"+extra);
     }
