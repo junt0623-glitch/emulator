@@ -818,6 +818,10 @@ function apiText(){
   L.push("paused: "+kind(e,"paused")+" / play: "+kind(e,"play")+" / pause: "+kind(e,"pause"));
   if(e.canvas) L.push("canvas: "+e.canvas.width+"x"+e.canvas.height);
   if(gm){
+    try{ L.push("supportsStates(): "+(typeof gm.supportsStates==="function"?String(gm.supportsStates()):"無し")); }
+    catch(err){ L.push("supportsStates(): 例外 "+err.message); }
+    try{ L.push("getFrameNum(): "+(typeof gm.getFrameNum==="function"?gm.getFrameNum():"無し")+"（押すたびに増えていれば動いています）"); }
+    catch(err){ L.push("getFrameNum(): 例外 "+err.message); }
     L.push("getState: "+kind(gm,"getState")+" / loadState: "+kind(gm,"loadState"));
     L.push("gameManager の関数:");
     L.push("  "+fnsOf(gm).join(", "));
@@ -1074,6 +1078,26 @@ function toU8(v){
   return null;
 }
 function slotNote(msg){ $("#slotNote").textContent=msg; toast(msg); }
+
+/* 本体が実際に動いているかを測る。
+   paused が false でも画面が黒い＝描画が進んでいないことがあるため、
+   フレーム番号が進むかどうかで判定する（EmulatorJS 4.2.3 の getFrameNum） */
+async function emuFrames(gm,ms){
+  try{
+    if(typeof gm.getFrameNum!=="function") return null;
+    const a=gm.getFrameNum();
+    await new Promise(r=>setTimeout(r,ms||250));
+    const b=gm.getFrameNum();
+    return {from:a,to:b,alive:b>a};
+  }catch(e){ return null; }
+}
+/* 止まっていたら動かし直す。実在する API だけを使う */
+async function emuRevive(gm){
+  try{ if(typeof gm.toggleMainLoop==="function") gm.toggleMainLoop(1); }catch(_){}
+  try{ const e=window.EJS_emulator;
+    if(e&&e.paused&&typeof e.play==="function") e.play(); }catch(_){}
+  return await emuFrames(gm,300);
+}
 /* 1KB未満はバイト表示にする。小さすぎる保存に気付けるように */
 function sizeText(n){ return n<1024 ? n+" B" : Math.round(n/1024)+" KB"; }
 
@@ -1086,6 +1110,8 @@ $("#slots").addEventListener("click", async e=>{
     if(s){
       const n=+s.dataset.save;
       if(typeof gm.getState!=="function"){ slotNote("この版のEmulatorJSには保存APIがありません"); return; }
+      try{ if(typeof gm.supportsStates==="function" && !gm.supportsStates()){
+        slotNote("このコアはセーブ状態に対応していません"); return; } }catch(_){}
       let state=await gm.getState();
       if(state&&state.data) state=state.data;          // 包まれて返る版に備える
       const u8=toU8(state);
@@ -1106,19 +1132,23 @@ $("#slots").addEventListener("click", async e=>{
       const fns=[gm.loadState, gm.functions&&gm.functions.loadState, window.EJS_emulator.loadState]
         .filter(f=>typeof f==="function");
       if(!fns.length){ slotNote("この版のEmulatorJSには読込APIがありません"); return; }
+      try{ if(typeof gm.supportsStates==="function" && !gm.supportsStates()){
+        slotNote("このコアはセーブ状態に対応していません"); return; } }catch(_){}
       let done=false, last="";
       for(const f of fns){
         try{ await f.call(gm,new Uint8Array(u8)); done=true; break; }
         catch(err){ last=(err&&err.message)?err.message:String(err); }
       }
-      // 読込は通っても本体が止まったままだと画面が黒いままになる。動かし直す
-      let resumed="";
-      try{
-        const e2=window.EJS_emulator;
-        if(e2&&e2.paused&&typeof e2.play==="function"){ e2.play(); resumed="／再開しました"; }
-      }catch(_){}
-      slotNote(done ? "枠 "+n+" を読み込みました（"+sizeText(u8.length)+"）"+resumed
-                    : "読込に失敗しました: "+last);
+      if(!done){ slotNote("読込に失敗しました: "+last); return; }
+      // 読込は通っても画面が黒いままのことがある。実際に絵が進んでいるか測る
+      let extra="";
+      const st=await emuFrames(gm);
+      if(st&&!st.alive){
+        const st2=await emuRevive(gm);
+        extra = (st2&&st2.alive) ? "／止まっていたので動かし直しました"
+                                 : "／本体が止まったままです（frame "+st.to+"）";
+      }
+      slotNote("枠 "+n+" を読み込みました（"+sizeText(u8.length)+"）"+extra);
     }
   }catch(err){
     slotNote("失敗: "+((err&&err.message)?err.message:err));
